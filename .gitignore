@@ -7,8 +7,9 @@ __pycache__/
 .venv/
 venv/
 
-# Environment variables
-.env
+# Environment variables — never commit real secrets
+.env*
+!.env.example
 
 # IDE
 .vscode/
@@ -22,3 +23,7 @@ backend/**/__pycache__/
 
 # Logs
 *.log
+
+# Test artifacts
+.pytest_cache/
+backend/.pytest_cache/
