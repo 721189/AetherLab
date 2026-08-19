@@ -23,6 +23,10 @@ class Settings(BaseSettings):
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # External data-provider API keys (optional; ingestion only works when set).
+    OPENWEATHER_API_KEY: str = ""
+    OPENAQ_API_KEY: str = ""
+
     # Optional CORS / server configuration.
     CORS_ORIGINS: list[str] = []
 

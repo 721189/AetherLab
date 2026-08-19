@@ -8,7 +8,8 @@
 
 AetherLab is an intelligent environmental platform that combines **geospatial data, weather, air quality, satellite imagery, and autonomous systems** to help people understand and monitor the environment around them. This repository contains the **backend API** that powers the platform.
 
-The backend is a layered, production-oriented **FastAPI** service: authenticated users manage **projects**, spin up **AI agents** inside them, and hold **conversations** with those agents through an interchangeable **LLM provider** abstraction.
+The backend is a layered, production-oriented **FastAPI** service: authenticated users manage **projects**, spin up **AI agents** inside them, and hold **conversations** with those agents through an interchangeable **LLM provider** abstraction. It also ingests real-time **environmental data** (weather + air quality) from external providers and exposes it through versioned query endpoints.
+
 
 ---
 
@@ -21,6 +22,7 @@ The backend is a layered, production-oriented **FastAPI** service: authenticated
 - **📁 Project management** — create, list, update, and soft-delete (archive) projects with strict per-user ownership
 - **🤖 AI Agents** — create, configure, list, update, and archive agents scoped to a project (model, temperature, system prompt, JSON config)
 - **💬 Conversations** — per-project chat history with **persistent messages** and an LLM-powered reply flow
+- **🌍 Environmental intelligence** — automatic ingestion of weather (OpenWeather) and air quality (OpenAQ) data, with historical latest/geofence query endpoints and optional Celery-based scheduled collection
 - **🧩 Pluggable AI providers** — `LLMProvider` ABC with an OpenAI implementation behind a factory, so providers can be swapped/extended
 - **🛠️ Engineering standards**
   - Versioned API under `/api/v1`
@@ -237,6 +239,10 @@ curl -X POST http://localhost:8000/api/v1/projects/1/conversations \
 curl -X POST http://localhost:8000/api/v1/projects/1/conversations/1/messages \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"content": "Summarize today air quality trends."}'
+
+# 6. Query environmental intelligence
+curl "http://localhost:8000/api/v1/environmental/latest?location_name=Delhi"
+curl "http://localhost:8000/api/v1/environmental/historical?location_name=Delhi&hours=24"
 ```
 ---
 
@@ -252,6 +258,8 @@ curl -X POST http://localhost:8000/api/v1/projects/1/conversations/1/messages \
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT lifetime in minutes | `30` |
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379/0` |
 | `OPENAI_API_KEY` | Required only for LLM message endpoints | — |
+| `OPENWEATHER_API_KEY` | Required only for weather ingestion | — |
+| `OPENAQ_API_KEY` | Required only for air-quality ingestion | — |
 
 > **Security:** never commit real `.env` values. The repo ignores all `.env*` files; only the `.env.example` template is tracked. Rotate `SECRET_KEY` and API keys before production.
 
@@ -263,9 +271,10 @@ The suite covers the full vertical slice — **register → login → create pro
 
 ```bash
 cd backend
-pytest -v        # 60+ tests
+pytest -v        # 72 tests
 pytest tests/test_auth.py -v
 pytest tests/test_conversations.py -v
+pytest tests/test_environmental.py -v
 ```
 
 Tests run against an in-memory SQLite database and a **mocked LLM provider**, so they are fast, deterministic, and require **no external services**.
@@ -292,11 +301,12 @@ alembic downgrade -1
 alembic history
 ```
 
-Current schema (`head` = `e5f9a1c3d7b2`):
+Current schema (`head` = `f7a3b2c5d9e1`):
 
 ```
 users → projects → agents
                   └→ conversations → messages
+environmental_readings  (weather + air-quality snapshots)
 ```
 
 ---
