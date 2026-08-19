@@ -73,11 +73,14 @@ class ConversationService:
         conv_id: int,
         owner_id: int,
         content: str,
-        agent_model: str = "gpt-4o",
+        agent_model: Optional[str] = None,
     ) -> Optional[dict]:
         """Persist the user message, query the LLM, persist the assistant reply,
         and return the exchange. Returns None if the conversation is not owned
         by the caller.
+
+        ``agent_model`` is optional; when omitted the provider factory resolves
+        the configured default (free Nemotron via OpenRouter when available).
         """
         conv = self.conv_repo.get_by_id(conv_id, owner_id)
         if not conv:

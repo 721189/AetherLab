@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     OPENWEATHER_API_KEY: str = ""
     OPENAQ_API_KEY: str = ""
 
+    # LLM configuration. OpenRouter hosts free Nemotron models and is preferred
+    # when its API key is present. LLM_MODEL overrides the default model.
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_SITE_URL: str = "https://aetherlab.app"
+    LLM_MODEL: str = "nvidia/nemotron-4-340b-base"
+
     # Optional CORS / server configuration.
     CORS_ORIGINS: list[str] = []
 

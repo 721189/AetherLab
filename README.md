@@ -24,6 +24,7 @@ The backend is a layered, production-oriented **FastAPI** service: authenticated
 - **💬 Conversations** — per-project chat history with **persistent messages** and an LLM-powered reply flow
 - **🌍 Environmental intelligence** — automatic ingestion of weather (OpenWeather) and air quality (OpenAQ) data, with historical latest/geofence query endpoints and optional Celery-based scheduled collection
 - **🧩 Pluggable AI providers** — `LLMProvider` ABC with an OpenAI implementation behind a factory, so providers can be swapped/extended
+- **🆓 Free LLM by default** — when `OPENROUTER_API_KEY` is set, agent replies are served by **free Nemotron models via OpenRouter** instead of the paid OpenAI API (default model `nvidia/nemotron-4-340b-base`, overridable with `LLM_MODEL`)
 - **🛠️ Engineering standards**
   - Versioned API under `/api/v1`
   - Layered architecture: `api → services → repositories → models`
@@ -257,9 +258,15 @@ curl "http://localhost:8000/api/v1/environmental/historical?location_name=Delhi&
 | `SECRET_KEY` | JWT signing key (min 32 chars, never default) | — (required) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT lifetime in minutes | `30` |
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379/0` |
-| `OPENAI_API_KEY` | Required only for LLM message endpoints | — |
+| `OPENROUTER_API_KEY` | **Preferred** LLM provider key (free Nemotron via OpenRouter) | — |
+| `OPENROUTER_SITE_URL` | Your app URL sent to OpenRouter | `https://aetherlab.app` |
+| `LLM_MODEL` | Default model for agent replies (free Nemotron) | `nvidia/nemotron-4-340b-base` |
+| `OPENAI_API_KEY` | *Fallback* LLM provider — **paid**, remove if you use OpenRouter | — |
 | `OPENWEATHER_API_KEY` | Required only for weather ingestion | — |
 | `OPENAQ_API_KEY` | Required only for air-quality ingestion | — |
+
+> 💡 **Keep AI free:** set `OPENROUTER_API_KEY` and leave `OPENAI_API_KEY` empty. The factory always prefers OpenRouter when its key is present, so agent replies use free Nemotron models and never bill you.
+
 
 > **Security:** never commit real `.env` values. The repo ignores all `.env*` files; only the `.env.example` template is tracked. Rotate `SECRET_KEY` and API keys before production.
 
