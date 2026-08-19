@@ -2,6 +2,7 @@ import logging
 import uuid
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import router
 from app.core.config import settings
@@ -17,6 +18,16 @@ app = FastAPI(
 
 setup_logging()
 register_exception_handlers(app)
+
+# CORS — allow the Next.js frontend to call this API from a different origin.
+if settings.CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 app.include_router(router)
 
