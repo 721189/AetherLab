@@ -29,6 +29,10 @@ backend/**/__pycache__/
 .pytest_cache/
 backend/.pytest_cache/
 
+# Local SQLite database (created when DATABASE_URL points at sqlite)
+backend/*.db
+*.db
+
 # Node.js / Next.js
 node_modules/
 .next/
