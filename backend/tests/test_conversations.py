@@ -257,3 +257,142 @@ class TestSendMessage:
             headers=auth(other_user),
         )
         assert resp.status_code == 404
+
+
+class TestListMessages:
+    def test_paginated_list_returns_messages(self, client, setup, fake_llm):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        conv_id = conv["id"]
+        base = (
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv_id}/messages"
+        )
+
+        # Three user turns => three user + three assistant messages.
+        client.post(base, json={"content": "First"}, headers=auth(setup["token"]))
+        client.post(base, json={"content": "Second"}, headers=auth(setup["token"]))
+        client.post(
+            base, json={"content": "Third"}, headers=auth(setup["token"])
+        )
+
+        resp = client.get(base, headers=auth(setup["token"]))
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 6
+        assert {m["role"] for m in body} == {"user", "assistant"}
+        # Oldest first.
+        assert body[0]["content"] == "First"
+        assert body[4]["content"] == "Third"
+
+        # Pagination slices the window.
+        page = client.get(
+            base,
+            headers=auth(setup["token"]),
+            params={"skip": 0, "limit": 2},
+        )
+        assert page.status_code == 200
+        assert len(page.json()) == 2
+        assert page.json()[0]["content"] == "First"
+
+        page2 = client.get(
+            base,
+            headers=auth(setup["token"]),
+            params={"skip": 2, "limit": 2},
+        )
+        assert page2.status_code == 200
+        contents = [m["content"] for m in page2.json()]
+        assert contents == ["Second", "Hello from fake LLM"]
+
+    def test_messages_for_missing_conversation(self, client, setup, fake_llm):
+        resp = client.get(
+            f"/api/v1/projects/{setup['project_id']}/conversations/9999/messages",
+            headers=auth(setup["token"]),
+        )
+        assert resp.status_code == 404
+
+    def test_cannot_list_another_users_messages(
+        self, client, setup, other_user, fake_llm
+    ):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.get(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages",
+            headers=auth(other_user),
+        )
+        assert resp.status_code == 404
+
+
+class TestStreamMessage:
+    def test_stream_returns_sse_chunks(self, client, setup, fake_llm):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        conv_id = conv["id"]
+        base = (
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv_id}/messages/stream"
+        )
+
+        resp = client.post(
+            base, json={"content": "Hello stream"}, headers=auth(setup["token"])
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        body = resp.text
+        assert "delta" in body
+        assert "Hello from fake LLM" in body
+        assert "[DONE]" in body
+        # Both the user and assistant messages were persisted.
+        fake_llm.called_with is not None  # provider was invoked
+
+    def test_stream_message_is_persisted(self, client, setup, fake_llm):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        conv_id = conv["id"]
+        stream_base = (
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv_id}/messages/stream"
+        )
+        msg_base = (
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv_id}/messages"
+        )
+
+        client.post(
+            stream_base,
+            json={"content": "Hi stream"},
+            headers=auth(setup["token"]),
+        )
+
+        msgs = client.get(msg_base, headers=auth(setup["token"])).json()
+        assert len(msgs) == 2
+        roles = [m["role"] for m in msgs]
+        assert roles == ["user", "assistant"]
+        assert msgs[-1]["content"] == "Hello from fake LLM"
+
+    def test_stream_requires_authentication(self, client, setup, fake_llm):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        base = (
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages/stream"
+        )
+        resp = client.post(base, json={"content": "Hi"})
+        assert resp.status_code == 401
+
+    def test_stream_missing_conversation(self, client, setup, fake_llm):
+        resp = client.post(
+            f"/api/v1/projects/{setup['project_id']}/conversations/9999"
+            f"/messages/stream",
+            json={"content": "Hi"},
+            headers=auth(setup["token"]),
+        )
+        assert resp.status_code == 404
+
+    def test_stream_404_for_other_user(
+        self, client, setup, other_user, fake_llm
+    ):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.post(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages/stream",
+            json={"content": "Hi"},
+            headers=auth(other_user),
+        )
+        assert resp.status_code == 404

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 from app.ai.factory import get_llm_provider
 from app.repositories.conversation_repository import ConversationRepository
@@ -112,3 +112,75 @@ class ConversationService:
             "user_message": MessageResponse.model_validate(user_msg),
             "assistant_message": MessageResponse.model_validate(assistant_msg),
         }
+
+    def list_messages(
+        self,
+        conv_id: int,
+        owner_id: int,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> Optional[List[MessageResponse]]:
+        """Return a paginated slice of messages for a conversation owned by
+        ``owner_id``. The newest messages are at the end of the list.
+
+        Returns ``None`` when the conversation is missing or not owned by the
+        caller, allowing the endpoint to return a 404 without leaking
+        existence.
+        """
+        conv = self.conv_repo.get_by_id(conv_id, owner_id)
+        if not conv:
+            return None
+        msgs = self.msg_repo.get_all_by_conversation(conv_id, skip, limit)
+        return [MessageResponse.model_validate(m) for m in msgs]
+
+    def stream_chat(
+        self,
+        conv_id: int,
+        owner_id: int,
+        content: str,
+        agent_model: Optional[str] = None,
+    ) -> Iterator[str]:
+        """Stream an assistant reply token-by-token.
+
+        Lazily validates ownership, persists the user message, builds the
+        message history, delegates to the provider's ``stream_response`` and,
+        once the stream completes (or the client disconnects), persists the
+        assistant reply and bumps the conversation timestamp.
+
+        Ownership is *also* asserted eagerly by ``list_messages``/the endpoint
+        before iteration begins so that a non-owner receives a 404 rather than
+        a 200 empty stream.
+        """
+        conv = self.conv_repo.get_by_id(conv_id, owner_id)
+        if not conv:
+            return
+        # Persist the user message immediately so it is part of the history
+        # the provider receives.
+        self.msg_repo.create(conv_id, "user", content)
+
+        # Build the history (now includes the user message) bounded to a sane
+        # window so large conversations don't blow past token limits.
+        history = self.msg_repo.get_all_by_conversation(conv_id, limit=50)
+        messages = [{"role": m.role, "content": m.content} for m in history]
+
+        provider = get_llm_provider(agent_model)
+
+        collected: List[str] = []
+        try:
+            for chunk in provider.stream_response(
+                messages=messages,
+                system_prompt=DEFAULT_SYSTEM_PROMPT,
+                temperature=0.7,
+            ):
+                collected.append(chunk)
+                yield chunk
+        finally:
+            # Persist the assistant reply (even on early client disconnect,
+            # best-effort) so the conversation history stays consistent.
+            text = "".join(collected)
+            if text:
+                self.msg_repo.create(conv_id, "assistant", text)
+                conv = self.conv_repo.get_by_id(conv_id, owner_id)
+                if conv:
+                    conv.updated_at = datetime.now(timezone.utc)
+                    self.db.commit()

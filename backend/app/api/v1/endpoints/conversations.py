@@ -1,6 +1,8 @@
-from typing import List
+import json
+from typing import Iterator, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from starlette.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.dependencies.auth import get_current_user
@@ -119,3 +121,65 @@ def send_message(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     return result
+
+
+@router.get("/{conv_id}/messages", response_model=List[MessageResponse])
+def list_messages(
+    project_id: int,
+    conv_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return a paginated slice of a conversation's messages (oldest first).
+
+    The window is bounded by ``skip``/``limit`` so a conversation with thousands
+    of messages never hydrates the entire history in one request.
+    """
+    service = ConversationService(db)
+    messages = service.list_messages(conv_id, current_user.id, skip, limit)
+    if messages is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return messages
+
+
+@router.post("/{conv_id}/messages/stream")
+def stream_message(
+    project_id: int,
+    conv_id: int,
+    message_data: MessageCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stream the assistant reply as Server-Sent Events.
+
+    The client receives one ``data`` line per token/chunk, plus a final
+    ``data: [DONE]`` line. Ownership is asserted up front so non-owners get a
+    404 instead of an empty 200 stream.
+    """
+    service = ConversationService(db)
+    # Eager ownership check: fail fast with a 404 for non-owners.
+    if not service.get_conversation(conv_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    exchange_stream = service.stream_chat(
+        conv_id, current_user.id, message_data.content
+    )
+
+    def event_stream() -> Iterator[str]:
+        try:
+            for chunk in exchange_stream:
+                payload = json.dumps({"delta": chunk})
+                yield f"data: {payload}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )

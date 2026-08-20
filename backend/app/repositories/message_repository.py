@@ -28,12 +28,15 @@ class MessageRepository:
     def get_all_by_conversation(
         self,
         conversation_id: int,
+        skip: int = 0,
         limit: int = 100,
     ) -> List[Message]:
+        """Return messages for a conversation, oldest->newest, paginated."""
         return (
             self.db.query(Message)
             .filter(Message.conversation_id == conversation_id)
             .order_by(Message.created_at.asc())
+            .offset(skip)
             .limit(limit)
             .all()
         )
