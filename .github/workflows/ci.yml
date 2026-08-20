@@ -1,0 +1,103 @@
+# Continuous Integration for AetherLab.
+#
+# Runs on every push to `main` and on every pull request. Two independent
+# jobs: the FastAPI backend (install + pytest) and the Next.js frontend
+# (type-check + production build).
+
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend · pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # requirements.txt was generated with `pip freeze > requirements.txt` on
+      # Windows PowerShell, so it is UTF-16 encoded AND contains Windows-only
+      # packages (pywin32, wincertstore, …) that do not exist on Linux. Linux
+      # pip needs UTF-8 text and must not try to install those lines, so
+      # normalise/filter here. The committed file stays authoritative for local
+      # Windows dev.
+      - name: Normalise requirements.txt for Linux CI (UTF-16 → UTF-8, drop Windows-only)
+        working-directory: ./
+        run: |
+          python - <<'PY'
+          import pathlib, re
+          req = pathlib.Path("requirements.txt")
+          raw = req.read_bytes()
+          text = raw.decode("utf-16") if b"\x00" in raw else raw.decode("utf-8")
+          # Windows-only distribution names (fine to drop for the Linux runner).
+          drop_prefix = re.compile(
+              r"^\s*(pywin32|pypiwin32|pywin32-setctime|wincertstore|winshell|windows-curses)[\w.\-]*\s*==",
+              re.IGNORECASE,
+          )
+          lines = [
+              ln for ln in text.splitlines()
+              if ln.strip() and not drop_prefix.match(ln)
+          ]
+          req.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Install backend dependencies
+        run: pip install --upgrade pip && pip install -r ../requirements.txt
+
+      - name: Run backend test suite
+        env:
+          APP_ENV: testing
+          DATABASE_URL: sqlite:///./ci.db
+          SECRET_KEY: aetherlab-ci-only-dev-secret-0123456789abcdef0123456789abcdef
+          REDIS_URL: redis://localhost:6379/0
+        # `python -m pytest` (not the `pytest` console script) puts `./backend`
+        # on sys.path so `app.main` is importable from conftest.
+        run: python -m pytest -v
+
+  frontend:
+    name: Frontend · typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # No ESLint dependency is installed (and next.config disables eslint at
+      # build time), so the type-check is the static gate.
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Production build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: npm run build

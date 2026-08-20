@@ -1,3 +1,0 @@
-﻿f0b0abf Setup backend database, SQLAlchemy and Alembic
-fd492fb Update README.md
-c737864 Initial commit

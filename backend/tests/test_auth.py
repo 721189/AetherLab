@@ -1,5 +1,7 @@
 import pytest
 
+from tests.conftest import register_and_verify
+
 
 def valid_payload(email="Alice@Example.com", password="StrongPass123!"):
     return {"email": email, "password": password}
@@ -10,25 +12,17 @@ def register(client, **overrides):
     return client.post("/api/v1/auth/register", json=payload), payload
 
 
-def register_and_login(client, **overrides):
-    resp, payload = register(client, **overrides)
-    assert resp.status_code == 201, resp.text
-    login = client.post(
-        "/api/v1/auth/login",
-        json={"email": payload["email"], "password": payload["password"]},
-    )
-    assert login.status_code == 200, login.text
-    return login.json()["access_token"], payload
-
-
 class TestRegister:
     def test_register_creates_user(self, client):
         resp, payload = register(client)
         assert resp.status_code == 201
         body = resp.json()
-        assert body["id"] == 1
+        user = body["user"]
+        assert user["id"] == 1
         # email is normalized to lowercase
-        assert body["email"] == "alice@example.com"
+        assert user["email"] == "alice@example.com"
+        # a verification token is issued for the new account
+        assert body["verification_token"]
         # password must never be returned
         assert "hashed_password" not in body
         assert "password" not in body
@@ -54,7 +48,7 @@ class TestRegister:
 
 class TestLogin:
     def test_login_returns_bearer_token(self, client):
-        _, payload = register(client)
+        _, payload = register_and_verify(client, "alice@example.com")
         resp = client.post(
             "/api/v1/auth/login",
             json={"email": payload["email"], "password": payload["password"]},
@@ -68,7 +62,7 @@ class TestLogin:
 
 class TestRefresh:
     def test_refresh_rotates_tokens(self, client):
-        _, payload = register(client)
+        _, payload = register_and_verify(client, "alice@example.com")
         login = client.post(
             "/api/v1/auth/login",
             json={"email": payload["email"], "password": payload["password"]},
@@ -100,7 +94,7 @@ class TestRefresh:
         assert resp.status_code == 401
 
     def test_refresh_rejects_access_token(self, client):
-        _, payload = register(client)
+        _, payload = register_and_verify(client, "alice@example.com")
         login = client.post(
             "/api/v1/auth/login",
             json={"email": payload["email"], "password": payload["password"]},
@@ -114,7 +108,7 @@ class TestRefresh:
         assert resp.status_code == 401
 
     def test_login_wrong_password(self, client):
-        _, payload = register(client)
+        _, payload = register_and_verify(client, "alice@example.com")
         resp = client.post(
             "/api/v1/auth/login",
             json={"email": payload["email"], "password": "WrongPass123!"},
@@ -131,7 +125,7 @@ class TestRefresh:
 
 class TestMe:
     def test_me_with_valid_token(self, client):
-        token, payload = register_and_login(client)
+        token, payload = register_and_verify(client, "alice@example.com")
         resp = client.get(
             "/api/v1/auth/me",
             headers={"Authorization": f"Bearer {token}"},

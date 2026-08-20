@@ -1,337 +1,534 @@
-# AetherLab
+# 🌍 AetherLab
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+**Environmental Intelligence & Autonomous Agent Platform**
+
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Latest-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-15-white?logo=vercel&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-D71F00?logo=sqlalchemy)](https://www.sqlalchemy.org/)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00?logo=sqlalchemy)](https://www.sqlalchemy.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tests](https://img.shields.io/badge/Tests-80%20passing-2ea44f)]()
 [![License](https://img.shields.io/badge/License-View%20LICENSE-blue)](/LICENSE)
 
-AetherLab is an intelligent environmental platform that combines **geospatial data, weather, air quality, satellite imagery, and autonomous systems** to help people understand and monitor the environment around them. This repository contains the **backend API** that powers the platform.
+AetherLab is an **intelligent environmental intelligence platform** that combines **geospatial data, live weather, air quality, satellite imagery, and autonomous AI agents** into one secure, production-grade product. Users monitor the world around them, manage projects and agents, and converse with AI assistants backed by interchangeable LLM providers — all served by a **FastAPI** backend and a **Next.js** frontend.
 
-The backend is a layered, production-oriented **FastAPI** service: authenticated users manage **projects**, spin up **AI agents** inside them, and hold **conversations** with those agents through an interchangeable **LLM provider** abstraction. It also ingests real-time **environmental data** (weather + air quality) from external providers and exposes it through versioned query endpoints.
-
-
----
-
-## ✨ Features
-
-- **🔐 Authentication & security**
-  - `register` / `login` / `me` with JWT bearer authentication
-  - bcrypt password hashing with a strict password policy (12+ chars, upper/lower/digit/special)
-  - Email normalization, constant-time credential comparison, secret-key validation
-- **📁 Project management** — create, list, update, and soft-delete (archive) projects with strict per-user ownership
-- **🤖 AI Agents** — create, configure, list, update, and archive agents scoped to a project (model, temperature, system prompt, JSON config)
-- **💬 Conversations** — per-project chat history with **persistent messages** and an LLM-powered reply flow
-- **🌍 Environmental intelligence** — automatic ingestion of weather (OpenWeather) and air quality (OpenAQ) data, with historical latest/geofence query endpoints and optional Celery-based scheduled collection
-- **🧩 Pluggable AI providers** — `LLMProvider` ABC with an OpenAI implementation behind a factory, so providers can be swapped/extended
-- **🆓 Free LLM by default** — when `OPENROUTER_API_KEY` is set, agent replies are served by **free Nemotron models via OpenRouter** instead of the paid OpenAI API (default model `nvidia/nemotron-4-340b-base`, overridable with `LLM_MODEL`)
-- **🛠️ Engineering standards**
-  - Versioned API under `/api/v1`
-  - Layered architecture: `api → services → repositories → models`
-  - Centralized dependency and exception architecture with consistent error payloads
-  - Structured logging with request IDs and sensitive-data redaction
-  - Environment-aware configuration (development / testing / production)
-- **🧪 Comprehensive test suite** (60+ tests) run against an in-memory database
+> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, an 80-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
 
 ---
 
-## 🏗️ Tech Stack
+## 🚀 Key Capabilities
 
-| Layer | Technology |
-|-------|------------|
-| Web framework | [FastAPI](https://fastapi.tiangolo.com/) |
-| Data validation | [Pydantic v2](https://docs.pydantic.dev/) + pydantic-settings |
-| ORM | [SQLAlchemy 2.x](https://www.sqlalchemy.org/) |
-| Migrations | [Alembic](https://alembic.sqlalchemy.org/) |
-| Database | [PostgreSQL 17](https://www.postgresql.org/) |
-| Auth | [python-jose](https://python-jose.readthedocs.io/) (JWT) + [passlib/bcrypt](https://passlib.readthedocs.io/) |
-| AI | [OpenAI SDK](https://github.com/openai/openai-python) (behind an abstraction) |
-| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` |
-| Server | [uvicorn](https://www.uvicorn.org/) |
+| Domain | Capabilities |
+|--------|--------------|
+| **🔐 Identity** | Register → email verification → login → **rotating refresh tokens** with reuse detection. bcrypt hashing, strict password policy, per-user ownership & access control |
+| **📁 Projects** | Create / list / update / soft-archive projects with strict data isolation between users |
+| **🤖 Agents** | Configure autonomous AI agents per project (model, temperature, system prompt, JSON config, lifecycle status) |
+| **💬 Conversations** | Persistent per-project chat history with an LLM-powered reply flow |
+| **🌍 Environmental** | Ingest live weather (OpenWeather) & air quality (OpenAQ); query latest / historical / geofenced readings; optional Celery ingestion |
+| **🧩 AI Providers** | Pluggable `LLMProvider` abstraction (OpenAI impl) behind a factory. **Free Nemotron model via OpenRouter by default** |
+| **🛡️ Hardening** | Rate limiting (slowapi), health-check liveness probes, CORS policy, JWT secret validation, sensitive-data log redaction |
+| **🖥️ Frontend** | Next.js 15 app for auth, dashboard, projects, agents, chat & environmental maps/gauges, with server-side auth middleware & error boundaries |
+| **⚙️ Ops** | Docker-ready, environment-aware config (dev/test/prod), Alembic migrations, GitHub Actions CI |
 
 ---
 
-## 📁 Project Structure
+## 🏗️ Architecture
+
+The system uses a **defense-in-depth, layered backend** with a separate frontend, joined by a versioned, JWT-secured REST API.
+
+```
+                        ┌────────────────────────────┐
+   Browser  ───────────►│   Next.js Frontend         │
+   (Next.js App)        │   • Auth middleware        │
+                        │   • React Query + Zustand  │
+                        └────────────┬───────────────┘
+                                     │ HTTPS / REST (JWT Bearer)
+                                     ▼
+              ┌──────────────────────────────────────┐
+              │            FastAPI Backend           │
+              │   /api/v1  (versioned, rate-limited) │
+              │   api → services → repositories → models
+              └───────┬──────────────────┬───────────┘
+                      │                  │
+               PostgreSQL          External providers
+               (SQLAlchemy + Alembic)  (OpenWeather, OpenAQ, OpenRouter/OpenAI)
+```
+
+**Key principles**
+
+| Principle | Implementation |
+|-----------|----------------|
+| Layering | `api → services → repositories → models`; schemas separate network contracts from ORM models |
+| Versioning | All routes under `/api/v1` — non-breaking evolution |
+| Tenancy | Every resource is scoped to the authenticated **owner**; cross-user access returns `404` |
+| Security | JWT access + rotating refresh tokens, bcrypt, verified-email gate, rate limits |
+| Testability | In-memory SQLite + mocked LLM for fast, deterministic, external-service-free tests |
+
+---
+## 🧰 Technology Stack
+
+### Backend
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Web framework | [FastAPI](https://fastapi.tiangolo.com/) | Async-native, OpenAPI-generated REST API |
+| Validation | [Pydantic v2](https://docs.pydantic.dev/) + `pydantic-settings` | Request/response contracts & env config |
+| ORM | [SQLAlchemy 2.x](https://www.sqlalchemy.org/) | Typed, declarative model layer |
+| Migrations | [Alembic](https://alembic.sqlalchemy.org/) | Versioned schema evolution |
+| Database | [PostgreSQL 17](https://www.postgresql.org/) | Primary store |
+| Auth | [python-jose](https://python-jose.readthedocs.io/) + [passlib/bcrypt](https://passlib.readthedocs.io/) | JWT + password hashing |
+| Rate limiting | [slowapi](https://github.com/laurentS/slowapi) | Per-endpoint in-memory limits |
+| Task queue | [Celery](https://docs.celeryq.dev/) | Optional scheduled environmental ingestion |
+| AI SDK | [OpenAI SDK](https://github.com/openai/openai-python) | Behind a provider abstraction |
+| Server | [uvicorn](https://www.uvicorn.org/) | ASGI server |
+| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 80-test suite |
+
+### Frontend
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Framework | [Next.js 15](https://nextjs.org/) (App Router) | Full-stack React app + SSR |
+| Language | [TypeScript 5](https://www.typescriptlang.org/) | Statically-typed frontend |
+| UI toolkit | [Tailwind CSS](https://tailwindcss.com/) + Radix primitives | Responsive, accessible UI |
+| State | [Zustand](https://zustand-docs.vercel.app/) | Persistent client auth store |
+| Data | [TanStack React Query](https://tanstack.com/query) | Server-state caching |
+| Charts/Map | [Recharts](https://recharts.org/) + [React Map GL](https://visgl.github.io/react-map-gl/) | Trends, gauges & geospatial views |
+
+---
+
+## 📁 Repository Structure
 
 ```
 AetherLab/
+├── .github/
+│   └── workflows/ci.yml        # GitHub Actions CI (backend + frontend)
 ├── backend/
-│   ├── alembic/                  # Database migrations
-│   │   └── versions/             #   one revision per schema change
+│   ├── alembic/                 # Schema migrations
+│   │   └── versions/           # 7 revisions (users → … → refresh tokens)
 │   ├── app/
-│   │   ├── ai/                   # LLM provider abstraction
-│   │   │   └── providers/        #   base ABC + OpenAI implementation
-│   │   ├── api/v1/endpoints/     # Versioned HTTP routes
-│   │   ├── core/                 # Config, security, logging
-│   │   ├── db/                   # Engine, session, declarative base
-│   │   ├── dependencies/         # Reusable FastAPI dependencies
-│   │   ├── exceptions/           # Domain exceptions + global handlers
-│   │   ├── models/               # SQLAlchemy ORM models
-│   │   ├── repositories/         # Data-access layer
-│   │   ├── schemas/              # Pydantic request/response models
-│   │   └── services/             # Business-logic layer
-│   └── tests/                    # pytest suite
-├── .env.example                  # Environment variable template
-├── requirements.txt
+│   │   ├── api/                 # Route handlers (v1)
+│   │   ├── core/                # config, security, logging, rate limiter
+│   │   ├── db/                  # SQLAlchemy engine/session/Base
+│   │   ├── dependencies/        # get_db, get_current_user
+│   │   ├── exceptions/          # typed app errors + handlers
+│   │   ├── models/              # SQLAlchemy models
+│   │   ├── repositories/        # data access layer
+│   │   ├── schemas/             # Pydantic contracts
+│   │   ├── services/            # business logic (use-cases)
+│   │   ├── tasks/               # optional Celery ingestion
+│   │   └── ai/                  # LLM provider abstraction + factory
+│   └── tests/                   # pytest suite (conftest auto-verifies users)
+├── frontend/
+│   ├── app/                     # Next.js routes (public + authenticated groups)
+│   ├── components/              # UI + feature components
+│   ├── hooks/                   # React Query hooks
+│   ├── lib/                     # API client, auth store, providers
+│   ├── types/                   # TypeScript mirrors of Pydantic schemas
+│   ├── Dockerfile               # Multi-stage, npm-based container
+│   └── middleware.ts            # Edge auth-route protection
+├── .env.example                 # Env template (safe to commit)
+├── requirements.txt             # Python dependencies
 └── README.md
-```
-
-The **layered architecture** keeps concerns separated and testable:
-
-```
-HTTP Request
-     │
-     ▼
-api/v1/endpoints  (routing, auth, validation)
-     │
-     ▼
-services          (business logic, orchestration)
-     │
-     ▼
-repositories      (data access / queries)
-     │
-     ▼
-models            (SQLAlchemy ORM)
-     │
-     ▼
-PostgreSQL
-```
 ---
 
-## 🚀 Getting Started
+## ⚡ Getting Started
 
-### Prerequisites
+### 1. Prerequisites
 
-- **Python 3.11+**
-- **PostgreSQL 17** running locally (or a remote instance)
-- Redis is optional (used for future caching/queues)
+| Tool | Version / Notes |
+|------|-----------------|
+| Python | 3.11+ (3.12 recommended for CI) |
+| PostgreSQL | 17 (or SQLite for local experimentation) |
+| Node.js | 20 (matches CI and the frontend Docker image) |
+| Docker | Required for the containerized frontend |
 
-### 1. Clone & install
+### 2. Clone the repository
 
 ```bash
 git clone https://github.com/721189/AetherLab.git
-cd AetherLab/backend
+cd AetherLab
+```
 
+### 3. Configure the backend
+
+```bash
+cd backend
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
+# Windows:  .venv\Scripts\activate        macOS/Linux:  source .venv/bin/activate
 pip install -r ../requirements.txt
 ```
 
-### 2. Configure environment
+Create your environment file from the template (never commit real secrets):
 
 ```bash
-cp .env.example .env
+cp ../.env.example .env      # then edit values
 ```
 
-Then edit `.env` with your values (especially `DATABASE_URL` and `SECRET_KEY`).
+At minimum set `DATABASE_URL` and a strong `SECRET_KEY` (≥ 32 chars).
 
-### 3. Set up the database & run migrations
+### 4. Initialize the database schema
 
 ```bash
-cd backend
-alembic upgrade head
+alembic upgrade head          # applies all migrations
 ```
 
-This applies all schema migrations (users, projects, agents, conversations, messages).
+To experiment without PostgreSQL, point `DATABASE_URL` at SQLite:
+`sqlite:///./aetherlab.db`.
 
-### 4. Run the API
+### 5. Run the backend
 
 ```bash
-cd backend
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The API is now live at `http://localhost:8000`. Interactive docs:
+Interactive docs: <http://localhost:8000/docs>  ·  ReDoc: <http://localhost:8000/redoc>
 
-- Swagger UI: <http://localhost:8000/docs>
-- ReDoc: <http://localhost:8000/redoc>
-
-### 5. Run the tests
+### 6. Run the frontend
 
 ```bash
-cd backend
-pytest
+cd ../frontend
+cp .env.local.example .env.local   # set NEXT_PUBLIC_API_URL
+npm install
+npm run dev                        # http://localhost:3000
 ```
-
-Tests use an in-memory SQLite database via a dependency override — **no live PostgreSQL or API keys are required**.
 
 ---
 
-## 🔌 API Reference
+## ⚙️ Configuration
 
-All endpoints are namespaced under `/api/v1`.
-
-### Authentication (`/api/v1/auth`)
-
-| Method | Endpoint  | Description                     | Auth |
-|--------|-----------|---------------------------------|------|
-| POST   | `/register` | Create a new user             | —    |
-| POST   | `/login`    | Obtain a JWT access token     | —    |
-| GET    | `/me`       | Return the current user       | ✅   |
-
-### Projects (`/api/v1/projects`)
-
-| Method | Endpoint            | Description                          | Auth |
-|--------|---------------------|--------------------------------------|------|
-| POST   | `/`                 | Create a project                     | ✅   |
-| GET    | `/`                 | List own projects                    | ✅   |
-| GET    | `/{id}`             | Get a project (owner only)           | ✅   |
-| PATCH  | `/{id}`             | Update a project                     | ✅   |
-| DELETE | `/{id}`             | Archive (soft-delete) a project      | ✅   |
-
-### Agents (`/api/v1/projects/{project_id}/agents`)
-
-| Method | Endpoint  | Description                     | Auth |
-|--------|-----------|---------------------------------|------|
-| POST   | `/`       | Create an agent in a project    | ✅   |
-| GET    | `/`       | List agents in a project        | ✅   |
-| GET    | `/{id}`   | Get an agent (owner only)       | ✅   |
-| PATCH  | `/{id}`   | Update an agent                 | ✅   |
-| DELETE | `/{id}`   | Archive an agent                | ✅   |
-
-### Conversations (`/api/v1/projects/{project_id}/conversations`)
-
-| Method | Endpoint              | Description                        | Auth |
-|--------|-----------------------|------------------------------------|------|
-| POST   | `/`                   | Create a conversation in a project | ✅   |
-| GET    | `/`                   | List conversations in a project    | ✅   |
-| GET    | `/{conv_id}`          | Get a conversation (owner only)    | ✅   |
-| PATCH  | `/{conv_id}`          | Update a conversation title        | ✅   |
-| DELETE | `/{conv_id}`          | Delete a conversation              | ✅   |
-| POST   | `/{conv_id}/messages` | Send a message & get an AI reply   | ✅   |
-
-### Quick start flow
-
-```bash
-# 1. Register
-curl -X POST http://localhost:8000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "you@example.com", "password": "StrongPass123!"}'
-
-# 2. Login
-curl -X POST http://localhost:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "you@example.com", "password": "StrongPass123!"}'
-# → returns {"access_token": "...", "refresh_token": "...", "token_type": "bearer"}
-
-TOKEN="<access_token>"
-
-# 2b. Rotate the refresh token (revokes the presented token, issues a new pair)
-curl -X POST http://localhost:8000/api/v1/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token": "<refresh_token>"}'
-
-# 3. Create a project
-curl -X POST http://localhost:8000/api/v1/projects/ \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "My First Project", "description": "Monitoring station"}'
-
-# 4. Create an agent
-curl -X POST http://localhost:8000/api/v1/projects/1/agents \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Weather Analyst", "model": "gpt-4o", "temperature": 0.4}'
-
-# 5. Start a conversation and chat
-curl -X POST http://localhost:8000/api/v1/projects/1/conversations \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title": "Environment chat"}'
-
-curl -X POST http://localhost:8000/api/v1/projects/1/conversations/1/messages \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"content": "Summarize today air quality trends."}'
-
-# 6. Query environmental intelligence
-curl "http://localhost:8000/api/v1/environmental/latest?location_name=Delhi"
-curl "http://localhost:8000/api/v1/environmental/historical?location_name=Delhi&hours=24"
-```
----
-
-## ⚙️ Environment Variables
+### Backend environment variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `APP_NAME` | Application name shown in docs | `AetherLab API` |
 | `APP_ENV` | `development`, `testing`, or `production` | `development` |
 | `DEBUG` | Enable debug-level logging | `False` |
-| `DATABASE_URL` | SQLAlchemy PostgreSQL connection string | — (required) |
-| `SECRET_KEY` | JWT signing key (min 32 chars, never default) | — (required) |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT lifetime in minutes | `30` |
-| `REFRESH_TOKEN_EXPIRE_MINUTES` | Refresh-token lifetime in minutes | `10080` (7 days) |
+| `DATABASE_URL` | SQLAlchemy connection string (**required**) | — |
+| `SECRET_KEY` | JWT signing key, ≥ 32 chars (**required**, never default) | — |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime | `30` |
+| `REFRESH_TOKEN_EXPIRE_MINUTES` | Refresh-token lifetime | `10080` (7 days) |
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379/0` |
-| `OPENROUTER_API_KEY` | **Preferred** LLM provider key (free Nemotron via OpenRouter) | — |
-| `OPENROUTER_SITE_URL` | Your app URL sent to OpenRouter | `https://aetherlab.app` |
-| `LLM_MODEL` | Default model for agent replies (free Nemotron) | `nvidia/nemotron-4-340b-base` |
-| `OPENAI_API_KEY` | *Fallback* LLM provider — **paid**, remove if you use OpenRouter | — |
-| `OPENWEATHER_API_KEY` | Required only for weather ingestion | — |
-| `OPENAQ_API_KEY` | Required only for air-quality ingestion | — |
+| `OPENROUTER_API_KEY` | **Preferred** free LLM key (Nemotron via OpenRouter) | — |
+| `OPENROUTER_SITE_URL` | App URL sent to OpenRouter | `https://aetherlab.app` |
+| `LLM_MODEL` | Default agent model | `nvidia/nemotron-4-340b-base` |
+| `OPENAI_API_KEY` | *Paid fallback* LLM provider (omit when using OpenRouter) | — |
+| `OPENWEATHER_API_KEY` | Weather ingestion | — |
+| `OPENAQ_API_KEY` | Air-quality ingestion | — |
+| `CORS_ORIGINS` | Allowed browser origins | `[]` |
 
-> 💡 **Keep AI free:** set `OPENROUTER_API_KEY` and leave `OPENAI_API_KEY` empty. The factory always prefers OpenRouter when its key is present, so agent replies use free Nemotron models and never bill you.
+> 💡 **Keep AI free:** set `OPENROUTER_API_KEY` and leave `OPENAI_API_KEY` empty. The factory **prefers OpenRouter** whenever its key is present, so agent replies use free Nemotron models and never bill you.
 
+### Frontend environment variables
 
-> **Security:** never commit real `.env` values. The repo ignores all `.env*` files; only the `.env.example` template is tracked. Rotate `SECRET_KEY` and API keys before production.
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_API_URL` | Base URL of the backend API, e.g. `http://localhost:8000` |
+
+> **Security:** never commit real `.env*` values. The repo ignores `.env*` and only tracks the `.env.example` template.
+---
+
+## 🔐 Authentication & Security
+
+AetherLab uses a **short-lived access token + rotating refresh token** model with mandatory **email verification** before first login.
+
+### Identity lifecycle
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as Auth API
+    participant D as Database
+    C->>A: POST /auth/register
+    A->>D: create user (is_verified=false)
+    A-->>C: 201 + verification_token
+    C->>A: GET /auth/verify/{token}
+    A->>D: set is_verified=true
+    A-->>C: 200
+    C->>A: POST /auth/login
+    A-->>C: { access_token, refresh_token }
+    C->>A: POST /auth/refresh
+    A->>D: revoke old, issue new (same family)
+    A-->>C: { access_token, refresh_token }
+```
+
+### Security controls
+
+| Control | Details |
+|---------|---------|
+| **Password hashing** | bcrypt via passlib; constant-time verification |
+| **Password policy** | ≥ 12 chars, upper + lower + digit + special |
+| **Email normalization** | Trim + lowercase before storage/lookup |
+| **Email verification** | Account cannot log in until verified (`login` returns `401 Email not verified`) |
+| **Access token** | Signed JWT (`HS256`), 30-min default lifetime |
+| **Refresh token** | Signed JWT with `type=refresh`, `family`, `jti` claims; **stored SHA-256 hashed**, never plaintext |
+| **Rotation + reuse detection** | Using a refresh token revokes it and issues a new one in the same family. **Replaying an already-rotated token revokes the entire family** (theft signal) |
+| **Rate limiting** | slowapi in-memory limits per endpoint (see rate limits below) |
+| **Tenancy** | Every project/agent/conversation is owner-scoped; cross-user access → `404` |
+| **Request IDs** | Every response carries `X-Request-ID` for tracing |
+| **Log redaction** | Secrets (`access_token`, `refresh_token`, `authorization`, keys) scrubbed from logs |
+
+> **Refresh-token model:** tokens are only ever stored **hashed**; the raw value is returned once at issuance. This mirrors the email-verification hardening and limits exposure if the database is compromised.
+
+### Endpoint map (authentication)
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `POST` | `/api/v1/auth/register` | ❌ | Create account → returns `verification_token` |
+| `GET` | `/api/v1/auth/verify/{token}` | ❌ | Confirm email, unlock login |
+| `POST` | `/api/v1/auth/resend-verification` | ❌ | Re-issue a verification token |
+| `POST` | `/api/v1/auth/login` | ❌ | Issue `{ access_token, refresh_token }` |
+| `POST` | `/api/v1/auth/refresh` | ✅ | Rotate the refresh token |
+| `GET` | `/api/v1/auth/me` | ✅ | Current user profile |
+
+---
+## 📡 API Reference
+
+All routes are versioned under `/api/v1`. `docs/` serves an interactive OpenAPI/Swagger UI; `redoc/` serves ReDoc. Authenticated routes accept a `Authorization: Bearer <access_token>` header.
+
+### Health
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/health` | ❌ | Liveness probe: `{"status":"ok","database":"connected"\|"unavailable"}` |
+
+### Projects
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/projects/` | ✅ | Create a project |
+| `GET` | `/api/v1/projects/` | ✅ | List own projects (`?skip=&limit=`) |
+| `GET` | `/api/v1/projects/{id}` | ✅ | Get a project (owner only) |
+| `PATCH` | `/api/v1/projects/{id}` | ✅ | Update a project (owner only) |
+| `DELETE` | `/api/v1/projects/{id}` | ✅ | Soft-delete (archive) a project |
+
+### Agents
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/projects/{pid}/agents/` | ✅ | Create an agent in a project |
+| `GET` | `/api/v1/projects/{pid}/agents/` | ✅ | List agents (`?skip=&limit=`) |
+| `GET` | `/api/v1/projects/{pid}/agents/{id}` | ✅ | Get an agent |
+| `PATCH` | `/api/v1/projects/{pid}/agents/{id}` | ✅ | Update an agent |
+| `DELETE` | `/api/v1/projects/{pid}/agents/{id}` | ✅ | Archive an agent |
+
+### Conversations & Messages
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/projects/{pid}/conversations/` | ✅ | Start a conversation |
+| `GET` | `/api/v1/projects/{pid}/conversations/` | ✅ | List conversations |
+| `GET` | `/api/v1/projects/{pid}/conversations/{cid}` | ✅ | Get a conversation |
+| `PATCH` | `/api/v1/projects/{pid}/conversations/{cid}` | ✅ | Update a conversation |
+| `DELETE` | `/api/v1/projects/{pid}/conversations/{cid}` | ✅ | Delete a conversation |
+| `POST` | `/api/v1/projects/{pid}/conversations/{cid}/messages` | ✅ | Send a message → LLM reply |
+
+### Environmental Intelligence
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/environmental/latest?location_name=` | ❌ | Most recent readings for a location |
+| `GET` | `/api/v1/environmental/historical?location_name=&hours=` | ❌ | Readings within `N` hours |
+| `GET` | `/api/v1/environmental/readings/{id}` | ❌ | Full reading by ID |
+| `GET` | `/api/v1/environmental/?lat=&lon=&radius_km=` | ❌ | Simplified geofence query |
+
+---
+
+## 🚦 Rate Limiting
+
+Limits are enforced with **slowapi** (shared in-memory limiter, keyed by client IP):
+
+| Endpoint | Limit |
+|----------|-------|
+| Register | 3/minute |
+| Login | 5/minute |
+| Verify / Resend | 10 & 3 per minute |
+| Refresh | 5/minute |
+| Health | 60/minute |
+| Default (all others) | 1000/hour |
+
+Responses include the structured `429` body `{ "detail": "Rate limit exceeded", "code": "rate_limit_exceeded" }`.
+
+> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 80-test suite never trips a per-IP cap.
+
+---
+
+## 🧪 Quick API Walkthrough (curl)
+
+```bash
+BASE=http://localhost:8000/api/v1
+
+# 1. Register (returns a verification_token)
+curl -X POST $BASE/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"StrongPass123!"}'
+
+# 2. Verify email (replaces the placeholder with the token above)
+curl "$BASE/auth/verify/<verification_token>"
+
+# 3. Login → access + refresh tokens
+curl -X POST $BASE/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"StrongPass123!"}'
+# → {"access_token":"...","refresh_token":"...","token_type":"bearer"}
+
+TOKEN="<access_token>"
+
+# 4. Rotate the refresh token (revokes old, issues new pair)
+curl -X POST $BASE/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token":"<refresh_token>"}'
+
+# 5. Create a project
+curl -X POST $BASE/projects/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"My Garden","description":"Backyard climate monitoring"}'
+
+# 6. Query environmental intelligence
+curl "$BASE/environmental/latest?location_name=Delhi"
+curl "$BASE/environmental/historical?location_name=Delhi&hours=24"
+```
+
+---
+---
+
+## 🗄️ Database Schema & Migrations
+
+Migrations are managed with **Alembic**. Run from `backend/`:
+
+```bash
+alembic upgrade head          # apply all pending
+alembic downgrade -1          # roll back one revision
+alembic history               # inspect history
+alembic revision --autogenerate -m "describe change"   # after model edits
+```
+
+### Schema lineage (head → newest direction)
+
+| Revision | Change |
+|----------|--------|
+| `a86209563be9` | Create `users` |
+| `b3f7a9c1d2e4` | Create `projects` |
+| `c4d8e0f2a6b1` | Create `agents` |
+| `e5f9a1c3d7b2` | Create `conversations` + `messages` |
+| `f7a3b2c5d9e1` | Create `environmental_readings` |
+| `b3c4d5e6f708` | Add email-verification columns to `users` |
+| `a1e2f3b4c5d6` | Create `refresh_tokens` (**head**) |
+
+### Relationship overview
+
+```
+users ──► refresh_tokens         (own refresh families)
+  │
+  └─► projects ──► agents
+         │
+         └─► conversations ──► messages
+environmental_readings   (independent weather + air-quality snapshots)
+```
+
+`refresh_tokens` stores only **SHA-256 hashes** and links each token to a `family_id` lineage; `replaced_by_id` records rotation chaining.
 
 ---
 
 ## 🧪 Testing
 
-The suite covers the full vertical slice — **register → login → create project → agents → conversations → AI reply** — plus negative cases (wrong credentials, cross-user access, invalid payloads, expired/invalid tokens).
+A **80-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
 
 ```bash
 cd backend
-pytest -v        # 72 tests
-pytest tests/test_auth.py -v
-pytest tests/test_conversations.py -v
-pytest tests/test_environmental.py -v
+python -m pytest                  # full suite (80 passed)
+python -m pytest tests/test_auth.py -v
+python -m pytest tests/test_projects.py tests/test_agents.py -v
 ```
 
-Tests run against an in-memory SQLite database and a **mocked LLM provider**, so they are fast, deterministic, and require **no external services**.
+Tests use an **in-memory SQLite** database and a **mocked LLM provider** — fast, deterministic, and require **no external services**. The `conftest.py` fixture overrides `get_db`, disables slowapi, and provides `register_and_verify()` to auto-verify test users (the exact flow the API uses).
 
 ---
 
-## 🗂️ Database Migrations
+## ⚙️ CI/CD (GitHub Actions)
 
-Migrations are managed with Alembic:
+Every push to `main` and every pull request triggers **two independent jobs** (`.github/workflows/ci.yml`):
+
+| Job | Runner | Steps |
+|-----|--------|-------|
+| **Backend · pytest** | ubuntu + Python 3.12 | Normalise `requirements.txt` for Linux (UTF-16 → UTF-8, drop Windows-only pkgs) → `pip install -r` → `pytest` |
+| **Frontend · typecheck + build** | ubuntu + Node 20 | `npm ci` → `tsc --noEmit` → `npm run build` |
+
+The CI step is safe on Windows-authored files: it fixes the PowerShell `pip freeze` encoding and filters Windows-only packages so the Linux runner can install the rest.
+
+---
+
+## 🛳️ Containerization (Frontend)
+
+The frontend ships a **multi-stage, npm-based Dockerfile** (`frontend/Dockerfile`):
+
+1. **base / deps** — install production deps from the lockfile
+2. **builder** — full install + `npm run build` with `NEXT_PUBLIC_*` overridable as build args
+3. **runner** — minimal non-root image with compiled app + `public` + config
 
 ```bash
-cd backend
-
-# Create a new migration after changing models
-alembic revision --autogenerate -m "describe change"
-
-# Apply pending migrations
-alembic upgrade head
-
-# Roll back the last migration
-alembic downgrade -1
-
-# Inspect migration history
-alembic history
+cd frontend
+docker build -f Dockerfile -t aetherlab-frontend \
+  --build-arg NEXT_PUBLIC_API_URL=http://host.docker.internal:8000 .
+docker run -p 3000:3000 aetherlab-frontend
 ```
 
-Current schema (`head` = `f7a3b2c5d9e1`):
+`.dockerignore` excludes `node_modules`, `.next`, `.env*`, and build noise so the container is clean and secret-free.
+
+---
+## 🖥️ Frontend Application
+
+The **Next.js 15** frontend (TypeScript, App Router, Tailwind + Radix UI) delivers the full product experience.
+
+### Route groups
+
+| Group | Public URL | Description |
+|-------|-----------|-------------|
+| `(auth)` | `/login`, `/register` | Email-based auth with verification-aware UX; authenticated users are redirected to `/dashboard` |
+| `(dashboard)` | `/dashboard`, `/dashboard/projects`, `/dashboard/projects/[id]`, `/dashboard/agents`, `/dashboard/environmental` | Authenticated workspace |
+
+### Resilience & UX
+
+- **Auth middleware** (`middleware.ts`) — an **Edge** layer that protects `/dashboard/*` via the `auth-token` cookie and bounces authenticated users away from `/login` & `/register`. The cookie is kept in sync with the Zustand store (`setAuth`/`logout`) and guarded for SSR/static generation.
+- **Error boundaries** (`components/ui/error-boundary.tsx`) — `ErrorBoundary` + `RetryOnError` clear the React Query cache and reload, so transient failures self-heal.
+- **React Query + Zustand** — robust server-state caching and a persistent, auth-aware client store.
+- **Rich dashboards** — AQI gauges, trend charts (Recharts), and geospatial views (React Map GL) for environmental data.
+
+### Frontend structure
 
 ```
-users → projects → agents
-                  └→ conversations → messages
-environmental_readings  (weather + air-quality snapshots)
+frontend/
+├── app/            # (auth) & (dashboard) route groups
+├── components/     # feature + ui primitives (dialogs, cards, charts, chat, maps)
+├── hooks/          # useAuth, useProjects, useAgents, useConversations, useEnvironmental
+├── lib/            # API client, auth/store, providers
+└── types/          # TS mirrors of Pydantic schemas (Token, User, Project, Agent, …)
 ```
 
 ---
 
 ## 🛣️ Roadmap
 
-- Streaming chat responses (`stream_response` on the provider layer)
+- Stream responses end-to-end (provider layer already exposes `stream_response`)
 - Agent ↔ conversation association and per-agent system prompts
 - Tool use / function calling for agents
-- Additional LLM providers (Anthropic, local models) via the factory
-- Pagination metadata envelope for list endpoints
-- Containerized deployment (Docker Compose) with production logging
+- Additional LLM providers (Anthropic, local OSS) via the factory
+- Pagination metadata envelopes for list endpoints
+- Backend containerization + Docker Compose for a one-command stack
+- Refresh-token revocation endpoint & family audit UI
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository and create a feature branch.
+2. Follow the layered conventions: **schemas → models → repositories → services → api**.
+3. Add tests alongside changes; the suite must stay green (`python -m pytest`).
+4. Update this README when you change behavior or configuration.
+5. Open a pull request — CI (backend pytest + frontend typecheck/build) must pass.
+
+**Conventions:** versioned routes under `/api/v1`; typed Pydantic contracts; owner-scoped queries; secrets in env, never in code; migrations for every schema change.
 
 ---
 
@@ -339,3 +536,7 @@ environmental_readings  (weather + air-quality snapshots)
 
 This project is licensed under the terms found in the [LICENSE](/LICENSE) file.
 
+---
+
+*AetherLab — monitor the environment. Automate the response.*
+```

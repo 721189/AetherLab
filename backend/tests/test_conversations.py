@@ -1,4 +1,8 @@
+import uuid
+
 import pytest
+
+from tests.conftest import register_and_verify
 
 
 # A fake LLM provider so messaging tests don't hit a real API.
@@ -19,18 +23,6 @@ class FakeProvider:
     def stream_response(self, messages, system_prompt=None, temperature=0.7,
                         max_tokens=None, **kwargs):
         yield self.reply
-
-
-def create_user_and_token(client, email):
-    payload = {"email": email, "password": "StrongPass123!"}
-    reg = client.post("/api/v1/auth/register", json=payload)
-    assert reg.status_code == 201, reg.text
-    login = client.post(
-        "/api/v1/auth/login",
-        json={"email": payload["email"], "password": payload["password"]},
-    )
-    assert login.status_code == 200, login.text
-    return login.json()["access_token"]
 
 
 def auth(token):
@@ -59,14 +51,16 @@ def create_conversation(client, token, project_id, title="My Chat"):
 
 @pytest.fixture
 def setup(client):
-    token = create_user_and_token(client, "alice@example.com")
+    token, _ = register_and_verify(
+        client, f"alice-{uuid.uuid4()}@example.com"
+    )
     project_id = create_project(client, token)
     return {"token": token, "project_id": project_id}
 
 
 @pytest.fixture
 def other_user(client):
-    return create_user_and_token(client, "bob@example.com")
+    return register_and_verify(client, f"bob-{uuid.uuid4()}@example.com")[0]
 
 
 @pytest.fixture

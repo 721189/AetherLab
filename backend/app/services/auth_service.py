@@ -137,7 +137,13 @@ class AuthService:
             raise AuthenticationError(detail="Invalid refresh token")
 
         now = datetime.now(timezone.utc)
-        if row.expires_at < now:
+        # `row.expires_at` is stored via SQLAlchemy DateTime, which holds a naive
+        # datetime on SQLite (Postgres would return an aware one). Normalise to
+        # UTC-aware so the comparison is valid on every backend.
+        expires_at = row.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < now:
             self.refresh_repo.revoke_family(row.family_id, now)
             self.refresh_repo.commit()
             raise AuthenticationError(detail="Refresh token has expired")

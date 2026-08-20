@@ -1,19 +1,8 @@
+import uuid
+
 import pytest
 
-
-def create_user_and_token(client, email):
-    payload = {
-        "email": email,
-        "password": "StrongPass123!",
-    }
-    reg = client.post("/api/v1/auth/register", json=payload)
-    assert reg.status_code == 201, reg.text
-    login = client.post(
-        "/api/v1/auth/login",
-        json={"email": payload["email"], "password": payload["password"]},
-    )
-    assert login.status_code == 200, login.text
-    return login.json()["access_token"]
+from tests.conftest import register_and_verify
 
 
 def auth(token):
@@ -22,12 +11,12 @@ def auth(token):
 
 @pytest.fixture
 def user_a(client):
-    return create_user_and_token(client, "alice@example.com")
+    return register_and_verify(client, f"alice-{uuid.uuid4()}@example.com")[0]
 
 
 @pytest.fixture
 def user_b(client):
-    return create_user_and_token(client, "bob@example.com")
+    return register_and_verify(client, f"bob-{uuid.uuid4()}@example.com")[0]
 
 
 def create_project(client, token, **overrides):

@@ -10,6 +10,7 @@ venv/
 # Environment variables — never commit real secrets
 .env*
 !.env.example
+!frontend/.env.local.example
 
 # IDE
 .vscode/
@@ -27,3 +28,27 @@ backend/**/__pycache__/
 # Test artifacts
 .pytest_cache/
 backend/.pytest_cache/
+
+# Node.js / Next.js
+node_modules/
+.next/
+frontend/node_modules/
+frontend/.next/
+
+# Build output / coverage
+dist/
+*.egg-info/
+.coverage
+backend/.coverage
+
+# Stray diagnostic / probe artifacts (generated during earlier debugging).
+# They are already tracked; remove from the index with:
+#   git rm --cached frontend/_dev_err.txt git_check.txt
+_check.txt
+backend/_diag.py
+backend/_diag_out.txt
+backend/_op.txt
+backend/_rt.txt
+frontend/_fb.txt
+frontend/_dev_err.txt
+git_check.txt
