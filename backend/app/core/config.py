@@ -23,6 +23,10 @@ class Settings(BaseSettings):
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # Refresh tokens live longer than access tokens and are rotated on use.
+    # Default is 7 days (10080 minutes).
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 10080
+
     # External data-provider API keys (optional; ingestion only works when set).
     OPENWEATHER_API_KEY: str = ""
     OPENAQ_API_KEY: str = ""

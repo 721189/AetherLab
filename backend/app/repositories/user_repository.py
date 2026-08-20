@@ -1,9 +1,13 @@
 import secrets
+from typing import TypeVar
+
 from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.schemas.user import UserCreate, normalize_email
 from app.core.security import hash_password
+
+T = TypeVar("T")
 
 
 class UserRepository:
@@ -29,6 +33,22 @@ class UserRepository:
         self.db.refresh(db_user)
 
         return db_user
+
+    def commit_refresh(self, instance: T) -> T:
+        """Persist pending changes on a tracked instance and refresh it."""
+        self.db.commit()
+        self.db.refresh(instance)
+        return instance
+
+    def get_by_id(self, user_id: int) -> User | None:
+        return self.db.get(User, user_id)
+
+    def get_by_verification_token(self, token_hash: str) -> User | None:
+        return (
+            self.db.query(User)
+            .filter(User.email_verification_token == token_hash)
+            .first()
+        )
 
     @staticmethod
     def constant_time_compare(val1: str, val2: str) -> bool:

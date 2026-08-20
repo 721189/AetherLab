@@ -3,8 +3,11 @@ import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.router import router
+from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
 from app.core.config import settings
 from app.core.logging import setup_logging, request_id_context
 from app.exceptions.handlers import register_exception_handlers
@@ -28,6 +31,12 @@ if settings.CORS_ORIGINS:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+# Rate limiting (slowapi). A single shared limiter is wired here so rate-limit
+# decorators on endpoints all report against the same state.
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 app.include_router(router)
 

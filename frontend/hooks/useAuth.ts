@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import * as authApi from "@/lib/api/auth";
 import { useAuth } from "@/lib/store/authStore";
 
@@ -36,19 +37,20 @@ export function useLogin() {
 
 export function useRegister() {
   const router = useRouter();
-  const setAuth = useAuth((s) => s.setAuth);
 
   return useMutation({
     mutationFn: ({ email, password }: { email: string; password: string }) =>
       authApi.register({ email, password }),
-    onSuccess: async (user, variables) => {
-      // The backend returns the user but not a token, so immediately log in.
-      const token = await authApi.login({
-        email: variables.email,
-        password: variables.password,
-      });
-      setAuth(token, user);
-      router.push("/dashboard");
+    onSuccess: async (resp) => {
+      // The backend returns the verification token directly (dev convenience).
+      // In production this step happens via the email link the user receives.
+      try {
+        await authApi.verifyEmail(resp.verification_token);
+        toast.success("Account created and email verified. Sign in.");
+      } catch {
+        toast.success("Account created — please verify your email.");
+      }
+      router.push("/login");
     },
   });
 }

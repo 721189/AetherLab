@@ -19,6 +19,7 @@ import { ProjectFormDialog } from "@/components/projects/ProjectFormDialog";
 import { useProjects } from "@/hooks/useProjects";
 import { useLatestEnv } from "@/hooks/useEnvironmental";
 import { aqiColor, aqiLabel } from "@/lib/utils";
+import { RetryOnError } from "@/components/ui/error-boundary";
 
 const DEFAULT_CITY = "London";
 
@@ -55,7 +56,8 @@ export default function DashboardPage() {
 
   const recent = (projects ?? []).slice(0, 3);
 
-  return (
+    return (
+    <RetryOnError>
     <div className="space-y-8">
       <motion.div
         initial={{ opacity: 0, y: 12 }}
@@ -143,7 +145,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <ProjectFormDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+            <ProjectFormDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </div>
+    </RetryOnError>
   );
 }

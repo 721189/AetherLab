@@ -216,9 +216,14 @@ curl -X POST http://localhost:8000/api/v1/auth/register \
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "password": "StrongPass123!"}'
-# → returns {"access_token": "...", "token_type": "bearer"}
+# → returns {"access_token": "...", "refresh_token": "...", "token_type": "bearer"}
 
 TOKEN="<access_token>"
+
+# 2b. Rotate the refresh token (revokes the presented token, issues a new pair)
+curl -X POST http://localhost:8000/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "<refresh_token>"}'
 
 # 3. Create a project
 curl -X POST http://localhost:8000/api/v1/projects/ \
@@ -257,6 +262,7 @@ curl "http://localhost:8000/api/v1/environmental/historical?location_name=Delhi&
 | `DATABASE_URL` | SQLAlchemy PostgreSQL connection string | — (required) |
 | `SECRET_KEY` | JWT signing key (min 32 chars, never default) | — (required) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT lifetime in minutes | `30` |
+| `REFRESH_TOKEN_EXPIRE_MINUTES` | Refresh-token lifetime in minutes | `10080` (7 days) |
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379/0` |
 | `OPENROUTER_API_KEY` | **Preferred** LLM provider key (free Nemotron via OpenRouter) | — |
 | `OPENROUTER_SITE_URL` | Your app URL sent to OpenRouter | `https://aetherlab.app` |

@@ -54,6 +54,26 @@ class UserResponse(BaseModel):
     }
 
 
+class EmailSchema(BaseModel):
+    email: EmailStr
+
+
+class UserRegisterResponse(BaseModel):
+    user: UserResponse
+    verification_token: str
+    message: str = "Account created. Please verify your email."
+
+
+class VerificationResponse(BaseModel):
+    message: str
+    verification_token: str | None = None
+
+
 class Token(BaseModel):
     access_token: str
-    token_type: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str

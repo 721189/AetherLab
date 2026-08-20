@@ -1,0 +1,45 @@
+# Build context for the frontend Dockerfile is the `frontend/` directory, so
+# everything here is relative to that folder.
+
+# Dependencies / build artifacts — never copy these into the image.
+node_modules
+.next
+.turbo
+.nuxt
+dist
+build
+
+# Local config / secrets — the build uses --build-arg / defaults instead.
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+.env.*
+
+# Tooling & VCS cruft.
+.git
+.gitignore
+Dockerfile
+.dockerignore
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.cjs
+.pnp.js
+tests
+test
+e2e
+__e2e__
+__mocks__
+coverage
+.git
+.github
+.vscode
+.idea
+
+# Docs / metadata (not needed at runtime).
+*.md
+LICENSE
+README.md

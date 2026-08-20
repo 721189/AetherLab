@@ -28,11 +28,10 @@ export default function RegisterPage() {
 
   const onSubmit = async (values: RegisterValues) => {
     try {
-      await register.mutateAsync({
+            await register.mutateAsync({
         email: values.email,
         password: values.password,
       });
-      toast.success("Account created");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Registration failed");
     }

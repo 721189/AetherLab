@@ -2,12 +2,29 @@
 
 export interface Token {
   access_token: string;
+  refresh_token: string;
   token_type: string;
+}
+
+export interface RefreshRequest {
+  refresh_token: string;
 }
 
 export interface User {
   id: number;
   email: string;
+  is_verified: boolean;
+}
+
+export interface UserRegisterResponse {
+  user: User;
+  verification_token: string;
+  message: string;
+}
+
+export interface VerificationResponse {
+  message: string;
+  verification_token?: string;
 }
 
 export interface Project {

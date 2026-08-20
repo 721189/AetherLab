@@ -63,6 +63,55 @@ class TestLogin:
         body = resp.json()
         assert body["token_type"] == "bearer"
         assert body["access_token"]
+        assert body["refresh_token"]
+
+
+class TestRefresh:
+    def test_refresh_rotates_tokens(self, client):
+        _, payload = register(client)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"email": payload["email"], "password": payload["password"]},
+        ).json()
+        old_refresh = login["refresh_token"]
+
+        resp = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": old_refresh},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["access_token"]
+        assert body["refresh_token"]
+        # The old token is rotated out and can no longer be used.
+        assert body["refresh_token"] != old_refresh
+
+        replay = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": old_refresh},
+        )
+        assert replay.status_code == 401
+
+    def test_refresh_rejects_garbage(self, client):
+        resp = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": "not.a.real.refresh.token"},
+        )
+        assert resp.status_code == 401
+
+    def test_refresh_rejects_access_token(self, client):
+        _, payload = register(client)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"email": payload["email"], "password": payload["password"]},
+        )
+        body = login.json()
+        # An access token must not be accepted where a refresh token is expected.
+        resp = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": body["access_token"]},
+        )
+        assert resp.status_code == 401
 
     def test_login_wrong_password(self, client):
         _, payload = register(client)

@@ -1,0 +1,7 @@
+count=6
+Route /openapi.json GET,HEAD
+Route /docs GET,HEAD
+Route /docs/oauth2-redirect GET,HEAD
+Route /redoc GET,HEAD
+_IncludedRouter ? 
+APIRoute / GET
