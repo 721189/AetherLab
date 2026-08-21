@@ -535,3 +535,94 @@ class TestAgentMessageConfig:
             headers=auth(setup["token"]),
         )
         assert resp.status_code == 404
+
+
+class TestSoftDeleteConversation:
+    def test_delete_archives_conversation(self, client, setup):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.delete(
+            f"/api/v1/projects/{setup['project_id']}/conversations/{conv['id']}",
+            headers=auth(setup["token"]),
+        )
+        assert resp.status_code == 204
+
+        # Hidden from get and list after soft delete.
+        get_resp = client.get(
+            f"/api/v1/projects/{setup['project_id']}/conversations/{conv['id']}",
+            headers=auth(setup["token"]),
+        )
+        assert get_resp.status_code == 404
+
+        list_resp = client.get(
+            f"/api/v1/projects/{setup['project_id']}/conversations",
+            headers=auth(setup["token"]),
+        )
+        ids = [c["id"] for c in list_resp.json()]
+        assert conv["id"] not in ids
+
+    def test_cannot_archive_another_users_conversation(
+        self, client, setup, other_user
+    ):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.delete(
+            f"/api/v1/projects/{setup['project_id']}/conversations/{conv['id']}",
+            headers=auth(other_user),
+        )
+        assert resp.status_code == 404
+
+
+class TestSoftDeleteMessage:
+    def test_archive_message_hides_it_from_list_and_total(
+        self, client, setup, fake_llm
+    ):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        base = (
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages"
+        )
+        sent = client.post(
+            base, json={"content": "Hi"}, headers=auth(setup["token"])
+        ).json()
+        user_msg_id = sent["user_message"]["id"]
+
+        # Before archiving the total is 2 (user + assistant).
+        before = client.get(base, headers=auth(setup["token"])).json()
+        assert before["pagination"]["total"] == 2
+
+        # Archive the user message.
+        del_resp = client.delete(
+            f"{base}/{user_msg_id}",
+            headers=auth(setup["token"]),
+        )
+        assert del_resp.status_code == 204
+
+        after = client.get(base, headers=auth(setup["token"])).json()
+        assert after["pagination"]["total"] == 1
+        roles = [m["role"] for m in after["data"]]
+        assert roles == ["assistant"]
+
+    def test_archive_message_missing_returns_404(self, client, setup, fake_llm):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.delete(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages/9999",
+            headers=auth(setup["token"]),
+        )
+        assert resp.status_code == 404
+
+    def test_cannot_archive_message_in_another_users_conversation(
+        self, client, setup, other_user, fake_llm
+    ):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        base = (
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages"
+        )
+        sent = client.post(
+            base, json={"content": "Hi"}, headers=auth(setup["token"])
+        ).json()
+        resp = client.delete(
+            f"{base}/{sent['user_message']['id']}",
+            headers=auth(other_user),
+        )
+        assert resp.status_code == 404

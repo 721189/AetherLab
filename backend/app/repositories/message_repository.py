@@ -31,10 +31,13 @@ class MessageRepository:
         skip: int = 0,
         limit: int = 100,
     ) -> List[Message]:
-        """Return messages for a conversation, oldest->newest, paginated."""
+        """Return non-archived messages for a conversation, oldest->newest."""
         return (
             self.db.query(Message)
-            .filter(Message.conversation_id == conversation_id)
+            .filter(
+                Message.conversation_id == conversation_id,
+                Message.is_archived.is_(False),
+            )
             .order_by(Message.created_at.asc())
             .offset(skip)
             .limit(limit)
@@ -42,9 +45,28 @@ class MessageRepository:
         )
 
     def count_by_conversation(self, conversation_id: int) -> int:
-        """Total number of messages in a conversation (drives pagination)."""
+        """Total number of non-archived messages in a conversation."""
         return (
             self.db.query(Message)
-            .filter(Message.conversation_id == conversation_id)
+            .filter(
+                Message.conversation_id == conversation_id,
+                Message.is_archived.is_(False),
+            )
             .count()
         )
+
+    def archive(self, message_id: int) -> bool:
+        """Soft-delete a message by setting ``is_archived``.
+
+        Returns True when a message with the given ID was found and archived.
+        """
+        msg = (
+            self.db.query(Message)
+            .filter(Message.id == message_id)
+            .first()
+        )
+        if not msg:
+            return False
+        msg.is_archived = True
+        self.db.commit()
+        return True

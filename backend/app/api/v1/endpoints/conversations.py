@@ -95,9 +95,11 @@ def delete_conversation(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """Soft-delete (archive) a conversation. It is hidden from queries but
+    retained in the database."""
     service = ConversationService(db)
-    deleted = service.delete_conversation(conv_id, current_user.id)
-    if not deleted:
+    archived = service.archive_conversation(conv_id, current_user.id)
+    if not archived:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return None
 
@@ -146,6 +148,23 @@ def list_messages(
     if messages is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return messages
+
+
+@router.delete("/{conv_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+def archive_message(
+    project_id: int,
+    conv_id: int,
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete (archive) a single message. It is hidden from the message
+    list and pagination counts but retained in the database."""
+    service = ConversationService(db)
+    archived = service.archive_message(conv_id, current_user.id, message_id)
+    if not archived:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return None
 
 
 @router.post("/{conv_id}/messages/stream")

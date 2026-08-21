@@ -26,13 +26,14 @@ class ConversationRepository:
         conv_id: int,
         owner_id: int,
     ) -> Optional[Conversation]:
-        """Get a conversation by ID, verifying ownership via its project."""
+        """Get a non-archived conversation by ID, verifying ownership."""
         return (
             self.db.query(Conversation)
             .join(Project)
             .filter(
                 Conversation.id == conv_id,
                 Project.owner_id == owner_id,
+                Conversation.is_archived.is_(False),
             )
             .first()
         )
@@ -44,19 +45,40 @@ class ConversationRepository:
         skip: int = 0,
         limit: int = 100,
     ) -> List[Conversation]:
-        """List conversations in a project (verifying ownership)."""
+        """List non-archived conversations in a project (verifying ownership)."""
         return (
             self.db.query(Conversation)
             .join(Project)
             .filter(
                 Conversation.project_id == project_id,
                 Project.owner_id == owner_id,
+                Conversation.is_archived.is_(False),
             )
             .order_by(Conversation.updated_at.desc())
             .offset(skip)
             .limit(limit)
             .all()
         )
+
+    def archive(self, conv_id: int, owner_id: int) -> bool:
+        """Soft-delete a conversation by setting ``is_archived``.
+
+        Requires ownership. Returns True when a conversation was archived.
+        """
+        conv = (
+            self.db.query(Conversation)
+            .join(Project)
+            .filter(
+                Conversation.id == conv_id,
+                Project.owner_id == owner_id,
+            )
+            .first()
+        )
+        if not conv:
+            return False
+        conv.is_archived = True
+        self.db.commit()
+        return True
 
     def update(
         self,

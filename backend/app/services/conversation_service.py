@@ -73,6 +73,30 @@ class ConversationService:
     ) -> bool:
         return self.conv_repo.delete(conv_id, owner_id)
 
+    def archive_conversation(
+        self,
+        conv_id: int,
+        owner_id: int,
+    ) -> bool:
+        """Soft-delete a conversation (sets ``is_archived``)."""
+        return self.conv_repo.archive(conv_id, owner_id)
+
+    def archive_message(
+        self,
+        conv_id: int,
+        owner_id: int,
+        message_id: int,
+    ) -> bool:
+        """Soft-delete a message, verifying the conversation is owned.
+
+        Returns False when the conversation is missing/unowned or the message
+        does not exist.
+        """
+        conv = self.conv_repo.get_by_id(conv_id, owner_id)
+        if not conv:
+            return False
+        return self.msg_repo.archive(message_id)
+
     def _resolve_llm_config(
         self,
         agent_id: Optional[int],

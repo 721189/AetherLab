@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -37,6 +37,15 @@ class Conversation(Base):
         DateTime,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+    # Soft-delete flag: archived conversations are hidden from queries but
+    # retained in the database.
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
     )
 
     project: Mapped["Project"] = relationship(
