@@ -17,11 +17,18 @@ class FakeProvider:
             "messages": messages,
             "system_prompt": system_prompt,
             "temperature": temperature,
+            "max_tokens": max_tokens,
         }
         return self.reply
 
     def stream_response(self, messages, system_prompt=None, temperature=0.7,
                         max_tokens=None, **kwargs):
+        self.called_with = {
+            "messages": messages,
+            "system_prompt": system_prompt,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
         yield self.reply
 
 
@@ -43,6 +50,24 @@ def create_conversation(client, token, project_id, title="My Chat"):
     resp = client.post(
         f"/api/v1/projects/{project_id}/conversations",
         json={"title": title},
+        headers=auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def create_agent(client, token, project_id, **overrides):
+    payload = {
+        "name": "Config Agent",
+        "model": "gpt-4o",
+        "system_prompt": "You are a configurable test assistant.",
+        "temperature": 1.5,
+        "max_tokens": 256,
+    }
+    payload.update(overrides)
+    resp = client.post(
+        f"/api/v1/projects/{project_id}/agents",
+        json=payload,
         headers=auth(token),
     )
     assert resp.status_code == 201, resp.text
@@ -394,5 +419,103 @@ class TestStreamMessage:
             f"/conversations/{conv['id']}/messages/stream",
             json={"content": "Hi"},
             headers=auth(other_user),
+        )
+        assert resp.status_code == 404
+
+
+class TestAgentMessageConfig:
+    def test_send_message_uses_agent_config(self, client, setup, fake_llm):
+        agent = create_agent(client, setup["token"], setup["project_id"])
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.post(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages",
+            json={"content": "Configured?", "agent_id": agent["id"]},
+            headers=auth(setup["token"]),
+        )
+        assert resp.status_code == 200
+        assert fake_llm.called_with["system_prompt"] == agent["system_prompt"]
+        assert fake_llm.called_with["temperature"] == agent["temperature"]
+        assert fake_llm.called_with["max_tokens"] == agent["max_tokens"]
+
+    def test_send_message_uses_agent_model(self, client, setup, fake_llm, monkeypatch):
+        agent = create_agent(
+            client, setup["token"], setup["project_id"], model="nvidia/custom-model"
+        )
+        captured = {}
+        import app.services.conversation_service as cs
+
+        def recorder(model, api_key=None, **kwargs):
+            captured["model"] = model
+            return fake_llm
+
+        monkeypatch.setattr(cs, "get_llm_provider", recorder)
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.post(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages",
+            json={"content": "Hi", "agent_id": agent["id"]},
+            headers=auth(setup["token"]),
+        )
+        assert resp.status_code == 200
+        assert captured["model"] == "nvidia/custom-model"
+
+    def test_send_message_missing_agent_returns_404(self, client, setup, fake_llm):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.post(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages",
+            json={"content": "Hi", "agent_id": 9999},
+            headers=auth(setup["token"]),
+        )
+        assert resp.status_code == 404
+
+    def test_send_message_rejects_agent_from_another_project(
+        self, client, setup, fake_llm
+    ):
+        token = setup["token"]
+        # A second project owned by the same user, with its own agent.
+        proj_b = client.post(
+            "/api/v1/projects/", json={"name": "Project B"}, headers=auth(token)
+        ).json()["id"]
+        agent_b = create_agent(client, token, proj_b)
+
+        conv = create_conversation(client, token, setup["project_id"])
+        resp = client.post(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages",
+            json={"content": "Hi", "agent_id": agent_b["id"]},
+            headers=auth(token),
+        )
+        assert resp.status_code == 404
+
+    def test_stream_uses_agent_config(self, client, setup, fake_llm):
+        agent = create_agent(
+            client,
+            setup["token"],
+            setup["project_id"],
+            system_prompt="Stream prompt",
+            temperature=1.0,
+        )
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.post(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages/stream",
+            json={"content": "Hi", "agent_id": agent["id"]},
+            headers=auth(setup["token"]),
+        )
+        assert resp.status_code == 200
+        # Fully consume the SSE body so the generator runs.
+        _ = resp.text
+        assert fake_llm.called_with["system_prompt"] == "Stream prompt"
+        assert fake_llm.called_with["temperature"] == 1.0
+
+    def test_stream_missing_agent_returns_404(self, client, setup, fake_llm):
+        conv = create_conversation(client, setup["token"], setup["project_id"])
+        resp = client.post(
+            f"/api/v1/projects/{setup['project_id']}"
+            f"/conversations/{conv['id']}/messages/stream",
+            json={"content": "Hi", "agent_id": 9999},
+            headers=auth(setup["token"]),
         )
         assert resp.status_code == 404

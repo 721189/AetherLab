@@ -116,7 +116,9 @@ def send_message(
     if not service.get_conversation(conv_id, current_user.id):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    result = service.send_message(conv_id, current_user.id, message_data.content)
+    result = service.send_message(
+        conv_id, current_user.id, message_data.content, message_data.agent_id
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -164,7 +166,7 @@ def stream_message(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     exchange_stream = service.stream_chat(
-        conv_id, current_user.id, message_data.content
+        conv_id, current_user.id, message_data.content, message_data.agent_id
     )
 
     def event_stream() -> Iterator[str]:

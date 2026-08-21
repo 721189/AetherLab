@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -10,6 +12,9 @@ class MessageBase(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
+    # Optional agent whose stored config (model, temperature, max_tokens,
+    # system_prompt) drives the LLM call for this message.
+    agent_id: Optional[int] = None
 
 
 class MessageResponse(MessageBase):

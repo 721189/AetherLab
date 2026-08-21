@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from typing import Iterator, List, Optional
 
 from app.ai.factory import get_llm_provider
+from app.exceptions import NotFoundError
+from app.repositories.agent_repository import AgentRepository
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.schemas.conversation import (
@@ -12,6 +14,8 @@ from app.schemas.conversation import (
 from app.schemas.message import MessageResponse
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant."
+DEFAULT_MODEL = "gpt-4o"
+DEFAULT_TEMPERATURE = 0.7
 
 
 class ConversationService:
@@ -19,6 +23,7 @@ class ConversationService:
         self.db = db
         self.conv_repo = ConversationRepository(db)
         self.msg_repo = MessageRepository(db)
+        self.agent_repo = AgentRepository(db)
 
     def create_conversation(
         self,
@@ -68,23 +73,60 @@ class ConversationService:
     ) -> bool:
         return self.conv_repo.delete(conv_id, owner_id)
 
+    def _resolve_llm_config(
+        self,
+        agent_id: Optional[int],
+        owner_id: int,
+        project_id: int,
+    ) -> tuple:
+        """Resolve the LLM call parameters used for a message.
+
+        When ``agent_id`` is provided the agent's stored configuration (model,
+        system prompt, temperature, max tokens) is used. Otherwise the provider
+        factory defaults are left untouched (``model=None``) so behaviour is
+        unchanged for conversations without an agent. A missing, unowned or
+        cross-project agent raises :class:`NotFoundError`.
+        """
+        if agent_id is None:
+            return None, DEFAULT_SYSTEM_PROMPT, DEFAULT_TEMPERATURE, None
+
+        agent = self.agent_repo.get_by_id(agent_id, owner_id)
+        if agent is None or agent.project_id != project_id:
+            raise NotFoundError(detail="Agent not found")
+
+        model = agent.model or DEFAULT_MODEL
+        temperature = (
+            agent.temperature
+            if agent.temperature is not None
+            else DEFAULT_TEMPERATURE
+        )
+        max_tokens = agent.max_tokens
+        system_prompt = agent.system_prompt or DEFAULT_SYSTEM_PROMPT
+        return model, system_prompt, temperature, max_tokens
+
     def send_message(
         self,
         conv_id: int,
         owner_id: int,
         content: str,
-        agent_model: Optional[str] = None,
+        agent_id: Optional[int] = None,
     ) -> Optional[dict]:
         """Persist the user message, query the LLM, persist the assistant reply,
         and return the exchange. Returns None if the conversation is not owned
         by the caller.
 
-        ``agent_model`` is optional; when omitted the provider factory resolves
-        the configured default (free Nemotron via OpenRouter when available).
+        ``agent_id`` optionally selects an agent whose stored configuration
+        (model, system prompt, temperature, max tokens) drives the LLM call.
+        When omitted the provider factory resolves the configured default (free
+        Nemotron via OpenRouter when available).
         """
         conv = self.conv_repo.get_by_id(conv_id, owner_id)
         if not conv:
             return None
+
+        model, system_prompt, temperature, max_tokens = self._resolve_llm_config(
+            agent_id, owner_id, conv.project_id
+        )
 
         # Save the user message.
         user_msg = self.msg_repo.create(conv_id, "user", content)
@@ -93,12 +135,13 @@ class ConversationService:
         history = self.msg_repo.get_all_by_conversation(conv_id, limit=50)
         messages = [{"role": m.role, "content": m.content} for m in history]
 
-        # Call the configured LLM provider.
-        provider = get_llm_provider(agent_model)
+        # Call the configured LLM provider with the resolved agent config.
+        provider = get_llm_provider(model)
         response_text = provider.generate_response(
             messages=messages,
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
-            temperature=0.7,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
         # Persist the assistant reply.
@@ -138,22 +181,26 @@ class ConversationService:
         conv_id: int,
         owner_id: int,
         content: str,
-        agent_model: Optional[str] = None,
+        agent_id: Optional[int] = None,
     ) -> Iterator[str]:
         """Stream an assistant reply token-by-token.
 
-        Lazily validates ownership, persists the user message, builds the
+        Ownership and (when ``agent_id`` is supplied) the agent config are
+        resolved eagerly — before the returned generator is iterated — so a
+        non-owner or missing agent produces a 404 rather than a broken 200
+        stream. The generator itself persists the user message, builds the
         message history, delegates to the provider's ``stream_response`` and,
         once the stream completes (or the client disconnects), persists the
         assistant reply and bumps the conversation timestamp.
-
-        Ownership is *also* asserted eagerly by ``list_messages``/the endpoint
-        before iteration begins so that a non-owner receives a 404 rather than
-        a 200 empty stream.
         """
         conv = self.conv_repo.get_by_id(conv_id, owner_id)
         if not conv:
             return
+
+        model, system_prompt, temperature, max_tokens = self._resolve_llm_config(
+            agent_id, owner_id, conv.project_id
+        )
+
         # Persist the user message immediately so it is part of the history
         # the provider receives.
         self.msg_repo.create(conv_id, "user", content)
@@ -163,24 +210,27 @@ class ConversationService:
         history = self.msg_repo.get_all_by_conversation(conv_id, limit=50)
         messages = [{"role": m.role, "content": m.content} for m in history]
 
-        provider = get_llm_provider(agent_model)
+        def _inner() -> Iterator[str]:
+            provider = get_llm_provider(model)
+            collected: List[str] = []
+            try:
+                for chunk in provider.stream_response(
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                ):
+                    collected.append(chunk)
+                    yield chunk
+            finally:
+                # Persist the assistant reply (even on early client disconnect,
+                # best-effort) so the conversation history stays consistent.
+                text = "".join(collected)
+                if text:
+                    self.msg_repo.create(conv_id, "assistant", text)
+                    conv = self.conv_repo.get_by_id(conv_id, owner_id)
+                    if conv:
+                        conv.updated_at = datetime.now(timezone.utc)
+                        self.db.commit()
 
-        collected: List[str] = []
-        try:
-            for chunk in provider.stream_response(
-                messages=messages,
-                system_prompt=DEFAULT_SYSTEM_PROMPT,
-                temperature=0.7,
-            ):
-                collected.append(chunk)
-                yield chunk
-        finally:
-            # Persist the assistant reply (even on early client disconnect,
-            # best-effort) so the conversation history stays consistent.
-            text = "".join(collected)
-            if text:
-                self.msg_repo.create(conv_id, "assistant", text)
-                conv = self.conv_repo.get_by_id(conv_id, owner_id)
-                if conv:
-                    conv.updated_at = datetime.now(timezone.utc)
-                    self.db.commit()
+        return _inner()
