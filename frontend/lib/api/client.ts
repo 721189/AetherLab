@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/nextjs";
 import { getAccessToken, useAuth } from "@/lib/store/authStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -57,6 +58,10 @@ export async function apiFetch<T>(
     }
     if (res.status === 401) {
       useAuth.getState().logout();
+    }
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      // Forward API failures to Sentry (5xx / validation / detail).
+      Sentry.captureException(new ApiError(res.status, detail));
     }
     throw new ApiError(res.status, detail);
   }

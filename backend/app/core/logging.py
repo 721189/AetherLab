@@ -97,8 +97,10 @@ class JsonFormatter(logging.Formatter):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "service": settings.APP_NAME,
+            "environment": settings.APP_ENV,
             "request_id": getattr(record, "request_id", None),
+            "message": record.getMessage(),
         }
 
         if record.exc_info:

@@ -10,9 +10,14 @@ from app.api.router import router
 from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
 from app.core.config import settings
 from app.core.logging import setup_logging, request_id_context
+from app.core.sentry import init_sentry
 from app.exceptions.handlers import register_exception_handlers
 
 logger = logging.getLogger("app.main")
+
+# Initialize Sentry before the app boots so startup errors are captured.
+# init_sentry() is a no-op when SENTRY_DSN is unset (tests/dev).
+init_sentry()
 
 app = FastAPI(
     title=settings.APP_NAME,

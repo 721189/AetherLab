@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     # Optional CORS / server configuration.
     CORS_ORIGINS: list[str] = []
 
+    # Observability — Sentry error & performance monitoring. Leaving SENTRY_DSN
+    # empty disables reporting entirely (init_sentry is a no-op).
+    SENTRY_DSN: str = ""
+    SENTRY_RELEASE: str = ""
+    # Performance monitoring sample rate (0.0 = disabled). Tune in prod, e.g. 0.1.
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+    SENTRY_SEND_DEFAULT_PII: bool = False
+
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
         case_sensitive=True,
