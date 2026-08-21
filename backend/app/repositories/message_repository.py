@@ -40,3 +40,11 @@ class MessageRepository:
             .limit(limit)
             .all()
         )
+
+    def count_by_conversation(self, conversation_id: int) -> int:
+        """Total number of messages in a conversation (drives pagination)."""
+        return (
+            self.db.query(Message)
+            .filter(Message.conversation_id == conversation_id)
+            .count()
+        )

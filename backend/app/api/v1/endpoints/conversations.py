@@ -13,7 +13,7 @@ from app.schemas.conversation import (
     ConversationResponse,
     ConversationUpdate,
 )
-from app.schemas.message import MessageCreate, MessageResponse
+from app.schemas.message import MessageCreate
 from app.services.conversation_service import ConversationService
 from app.services.project_service import ProjectService
 
@@ -125,7 +125,7 @@ def send_message(
     return result
 
 
-@router.get("/{conv_id}/messages", response_model=List[MessageResponse])
+@router.get("/{conv_id}/messages")
 def list_messages(
     project_id: int,
     conv_id: int,
@@ -136,8 +136,10 @@ def list_messages(
 ):
     """Return a paginated slice of a conversation's messages (oldest first).
 
-    The window is bounded by ``skip``/``limit`` so a conversation with thousands
-    of messages never hydrates the entire history in one request.
+    Responds with ``{"data": [...], "pagination": {"total", "skip", "limit",
+    "next", "prev"}}``. The window is bounded by ``skip``/``limit`` so a
+    conversation with thousands of messages never hydrates the entire history
+    in one request.
     """
     service = ConversationService(db)
     messages = service.list_messages(conv_id, current_user.id, skip, limit)

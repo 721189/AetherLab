@@ -303,11 +303,19 @@ class TestListMessages:
         resp = client.get(base, headers=auth(setup["token"]))
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body) == 6
-        assert {m["role"] for m in body} == {"user", "assistant"}
+        data = body["data"]
+        assert len(data) == 6
+        assert {m["role"] for m in data} == {"user", "assistant"}
         # Oldest first.
-        assert body[0]["content"] == "First"
-        assert body[4]["content"] == "Third"
+        assert data[0]["content"] == "First"
+        assert data[4]["content"] == "Third"
+        # Pagination metadata includes the total; all messages fit in the
+        # default window (limit=50), so there is no next page.
+        pagination = body["pagination"]
+        assert pagination["total"] == 6
+        assert pagination["skip"] == 0
+        assert pagination["limit"] == 50
+        assert pagination["next"] is None
 
         # Pagination slices the window.
         page = client.get(
@@ -316,8 +324,11 @@ class TestListMessages:
             params={"skip": 0, "limit": 2},
         )
         assert page.status_code == 200
-        assert len(page.json()) == 2
-        assert page.json()[0]["content"] == "First"
+        assert len(page.json()["data"]) == 2
+        assert page.json()["data"][0]["content"] == "First"
+        # First page has a next link but no prev.
+        assert page.json()["pagination"]["next"] is not None
+        assert page.json()["pagination"]["prev"] is None
 
         page2 = client.get(
             base,
@@ -325,8 +336,11 @@ class TestListMessages:
             params={"skip": 2, "limit": 2},
         )
         assert page2.status_code == 200
-        contents = [m["content"] for m in page2.json()]
+        contents = [m["content"] for m in page2.json()["data"]]
         assert contents == ["Second", "Hello from fake LLM"]
+        # Middle page links both ways.
+        assert page2.json()["pagination"]["prev"] is not None
+        assert page2.json()["pagination"]["next"] is not None
 
     def test_messages_for_missing_conversation(self, client, setup, fake_llm):
         resp = client.get(
@@ -386,11 +400,13 @@ class TestStreamMessage:
             headers=auth(setup["token"]),
         )
 
-        msgs = client.get(msg_base, headers=auth(setup["token"])).json()
+        body = client.get(msg_base, headers=auth(setup["token"])).json()
+        msgs = body["data"]
         assert len(msgs) == 2
         roles = [m["role"] for m in msgs]
         assert roles == ["user", "assistant"]
         assert msgs[-1]["content"] == "Hello from fake LLM"
+        assert body["pagination"]["total"] == 2
 
     def test_stream_requires_authentication(self, client, setup, fake_llm):
         conv = create_conversation(client, setup["token"], setup["project_id"])

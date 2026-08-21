@@ -162,10 +162,12 @@ class ConversationService:
         owner_id: int,
         skip: int = 0,
         limit: int = 100,
-    ) -> Optional[List[MessageResponse]]:
-        """Return a paginated slice of messages for a conversation owned by
-        ``owner_id``. The newest messages are at the end of the list.
+    ) -> Optional[dict]:
+        """Return a paginated slice of messages for an owned conversation.
 
+        The response shape is ``{"data": [...], "pagination": {...}}`` where
+        ``pagination`` carries the total count, the requested ``skip``/``limit``
+        and absolute ``next``/``prev`` URLs (``None`` when not applicable).
         Returns ``None`` when the conversation is missing or not owned by the
         caller, allowing the endpoint to return a 404 without leaking
         existence.
@@ -174,7 +176,17 @@ class ConversationService:
         if not conv:
             return None
         msgs = self.msg_repo.get_all_by_conversation(conv_id, skip, limit)
-        return [MessageResponse.model_validate(m) for m in msgs]
+        total = self.msg_repo.count_by_conversation(conv_id)
+        data = [MessageResponse.model_validate(m) for m in msgs]
+
+        base = f"/api/v1/projects/{conv.project_id}/conversations/{conv_id}/messages"
+        pagination = {"total": total, "skip": skip, "limit": limit, "next": None, "prev": None}
+        if skip + len(data) < total:
+            pagination["next"] = f"{base}?skip={skip + len(data)}&limit={limit}"
+        if skip > 0:
+            pagination["prev"] = f"{base}?skip={max(0, skip - limit)}&limit={limit}"
+
+        return {"data": data, "pagination": pagination}
 
     def stream_chat(
         self,
