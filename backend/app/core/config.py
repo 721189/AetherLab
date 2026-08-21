@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_SITE_URL: str = "https://aetherlab.app"
     LLM_MODEL: str = "nvidia/nemotron-4-340b-base"
+    # Smaller / free model used when the primary LLM model fails after retries.
+    # Leave empty to use the provider's built-in fallback (e.g. gpt-4o-mini).
+    LLM_FALLBACK_MODEL: str = ""
 
     # Optional CORS / server configuration.
     CORS_ORIGINS: list[str] = []
