@@ -20,6 +20,12 @@ router = APIRouter(
     "/",
     response_model=AgentResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Create an agent",
+    description=(
+        "Creates an AI agent within a project. The agent carries the model, "
+        "temperature, max tokens and system prompt used when driving chat."
+    ),
+    response_description="Agent created successfully",
 )
 def create_agent(
     project_id: int,
@@ -37,7 +43,13 @@ def create_agent(
     return service.create_agent(agent_data, project_id)
 
 
-@router.get("/", response_model=List[AgentResponse])
+@router.get(
+    "/",
+    response_model=List[AgentResponse],
+    summary="List agents in a project",
+    description="Returns a paginated list of non-archived agents in a project.",
+    response_description="A list of the project's agents",
+)
 def list_agents(
     project_id: int,
     skip: int = Query(0, ge=0),
@@ -55,7 +67,13 @@ def list_agents(
     return service.get_agents_by_project(project_id, current_user.id, skip, limit)
 
 
-@router.get("/{agent_id}", response_model=AgentResponse)
+@router.get(
+    "/{agent_id}",
+    response_model=AgentResponse,
+    summary="Get an agent",
+    description="Returns a single agent owned by the authenticated user's project.",
+    response_description="The requested agent",
+)
 def get_agent(
     project_id: int,
     agent_id: int,
@@ -69,7 +87,13 @@ def get_agent(
     return agent
 
 
-@router.patch("/{agent_id}", response_model=AgentResponse)
+@router.patch(
+    "/{agent_id}",
+    response_model=AgentResponse,
+    summary="Update an agent",
+    description="Updates editable fields (e.g. model, temperature, status) of an agent.",
+    response_description="The updated agent",
+)
 def update_agent(
     project_id: int,
     agent_id: int,
@@ -84,7 +108,16 @@ def update_agent(
     return agent
 
 
-@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{agent_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Archive an agent",
+    description=(
+        "Soft-deletes an agent by archiving it. Archived agents are hidden from "
+        "list/get queries but retained in the database."
+    ),
+    response_description="Agent archived successfully",
+)
 def archive_agent(
     project_id: int,
     agent_id: int,

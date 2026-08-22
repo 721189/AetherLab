@@ -12,7 +12,13 @@ from app.services.environmental_service import EnvironmentalService
 router = APIRouter(prefix="/environmental", tags=["Environmental"])
 
 
-@router.get("/latest", response_model=list[EnvironmentalSummary])
+@router.get(
+    "/latest",
+    response_model=list[EnvironmentalSummary],
+    summary="Get the latest environmental readings",
+    description="Return the most recent readings recorded for a location.",
+    response_description="A list of the latest environmental summaries",
+)
 def get_latest_environmental(
     location_name: str = Query(..., min_length=1, max_length=255),
     limit: int = Query(10, ge=1, le=100),
@@ -24,7 +30,15 @@ def get_latest_environmental(
     return [EnvironmentalSummary.model_validate(r) for r in readings]
 
 
-@router.get("/historical", response_model=list[EnvironmentalSummary])
+@router.get(
+    "/historical",
+    response_model=list[EnvironmentalSummary],
+    summary="Get historical environmental readings",
+    description=(
+        "Return readings recorded for a location within the last ``hours``."
+    ),
+    response_description="A list of historical environmental summaries",
+)
 def get_historical_environmental(
     location_name: str = Query(..., min_length=1, max_length=255),
     hours: int = Query(24, ge=1, le=168),
@@ -36,7 +50,13 @@ def get_historical_environmental(
     return [EnvironmentalSummary.model_validate(r) for r in readings]
 
 
-@router.get("/readings/{reading_id}", response_model=EnvironmentalReadingResponse)
+@router.get(
+    "/readings/{reading_id}",
+    response_model=EnvironmentalReadingResponse,
+    summary="Get a single environmental reading",
+    description="Return a single fully-detailed environmental reading by ID.",
+    response_description="The detailed environmental reading",
+)
 def get_reading(
     reading_id: int,
     db: Session = Depends(get_db),
@@ -51,7 +71,16 @@ def get_reading(
     return reading
 
 
-@router.get("/", response_model=list[EnvironmentalSummary])
+@router.get(
+    "/",
+    response_model=list[EnvironmentalSummary],
+    summary="Get readings by geographic filter",
+    description=(
+        "Return readings near a geographic point within a radius (a simplified "
+        "geofence)."
+    ),
+    response_description="A list of environmental summaries near the point",
+)
 def get_readings_by_filter(
     lat: float = Query(...),
     lon: float = Query(...),

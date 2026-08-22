@@ -27,6 +27,11 @@ router = APIRouter(
     "/",
     response_model=ConversationResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Create a conversation",
+    description=(
+        "Creates a new conversation within a project to hold a message thread."
+    ),
+    response_description="Conversation created successfully",
 )
 def create_conversation(
     project_id: int,
@@ -43,7 +48,16 @@ def create_conversation(
     return service.create_conversation(project_id, current_user.id, data)
 
 
-@router.get("/", response_model=List[ConversationResponse])
+@router.get(
+    "/",
+    response_model=List[ConversationResponse],
+    summary="List conversations in a project",
+    description=(
+        "Returns a paginated list of non-archived conversations in a project, "
+        "ordered by most recently updated."
+    ),
+    response_description="A list of the project's conversations",
+)
 def list_conversations(
     project_id: int,
     skip: int = Query(0, ge=0),
@@ -59,7 +73,13 @@ def list_conversations(
     return service.list_conversations(project_id, current_user.id, skip, limit)
 
 
-@router.get("/{conv_id}", response_model=ConversationResponse)
+@router.get(
+    "/{conv_id}",
+    response_model=ConversationResponse,
+    summary="Get a conversation",
+    description="Returns a single conversation owned by the authenticated user.",
+    response_description="The requested conversation",
+)
 def get_conversation(
     project_id: int,
     conv_id: int,
@@ -73,7 +93,13 @@ def get_conversation(
     return conv
 
 
-@router.patch("/{conv_id}", response_model=ConversationResponse)
+@router.patch(
+    "/{conv_id}",
+    response_model=ConversationResponse,
+    summary="Update a conversation",
+    description="Updates editable fields (e.g. title) of a conversation.",
+    response_description="The updated conversation",
+)
 def update_conversation(
     project_id: int,
     conv_id: int,
@@ -88,7 +114,16 @@ def update_conversation(
     return conv
 
 
-@router.delete("/{conv_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{conv_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Archive a conversation",
+    description=(
+        "Soft-deletes (archives) a conversation. It is hidden from queries but "
+        "retained in the database."
+    ),
+    response_description="Conversation archived successfully",
+)
 def delete_conversation(
     project_id: int,
     conv_id: int,
@@ -104,7 +139,18 @@ def delete_conversation(
     return None
 
 
-@router.post("/{conv_id}/messages", response_model=dict)
+@router.post(
+    "/{conv_id}/messages",
+    response_model=dict,
+    summary="Send a message and get a reply",
+    description=(
+        "Persists a user message, invokes the LLM (optionally configured by an "
+        "agent) and persists the assistant reply. Returns both messages. When "
+        "`agent_id` is provided the agent's model/temperature/max_tokens/system "
+        "prompt drive the call."
+    ),
+    response_description="The persisted user and assistant messages",
+)
 def send_message(
     project_id: int,
     conv_id: int,
@@ -127,7 +173,16 @@ def send_message(
     return result
 
 
-@router.get("/{conv_id}/messages")
+@router.get(
+    "/{conv_id}/messages",
+    summary="List messages in a conversation",
+    description=(
+        "Returns a paginated slice of a conversation's messages (oldest first) "
+        "as `{\"data\": [...], \"pagination\": {\"total\", \"skip\", \"limit\", "
+        "\"next\", \"prev\"}}`."
+    ),
+    response_description="A paginated payload of messages",
+)
 def list_messages(
     project_id: int,
     conv_id: int,
@@ -150,7 +205,16 @@ def list_messages(
     return messages
 
 
-@router.delete("/{conv_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{conv_id}/messages/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Archive a message",
+    description=(
+        "Soft-deletes (archives) a single message. It is hidden from the message "
+        "list and pagination counts but retained in the database."
+    ),
+    response_description="Message archived successfully",
+)
 def archive_message(
     project_id: int,
     conv_id: int,
@@ -167,7 +231,17 @@ def archive_message(
     return None
 
 
-@router.post("/{conv_id}/messages/stream")
+@router.post(
+    "/{conv_id}/messages/stream",
+    summary="Stream a reply as server-sent events",
+    description=(
+        "Persists the user message and streams the assistant reply one `data` "
+        "line per chunk over Server-Sent Events, ending with `data: [DONE]`. "
+        "Ownership is asserted up front so non-owners get a 404 instead of an "
+        "empty 200 stream. Accepts an optional `agent_id` in the body."
+    ),
+    response_description="A text/event-stream of reply deltas",
+)
 def stream_message(
     project_id: int,
     conv_id: int,

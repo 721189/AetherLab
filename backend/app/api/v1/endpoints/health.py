@@ -10,7 +10,15 @@ from app.dependencies.database import get_db
 router = APIRouter(tags=["Health"])
 
 
-@router.get("/health")
+@router.get(
+    "/health",
+    summary="Service health check",
+    description=(
+        "Liveness probe. Reports whether the database is reachable without "
+        "crashing when the DB is down."
+    ),
+    response_description="Overall service status and database connectivity",
+)
 @limiter.limit("60/minute")
 def health(request: Request, db: Session = Depends(get_db)):
     """Liveness probe. Reports DB connectivity without crashing when the DB is down."""
