@@ -8,12 +8,12 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00?logo=sqlalchemy)](https://www.sqlalchemy.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-80%20passing-2ea44f)]()
+[![Tests](https://img.shields.io/badge/Tests-120%20passing-2ea44f)]()
 [![License](https://img.shields.io/badge/License-View%20LICENSE-blue)](/LICENSE)
 
 AetherLab is an **intelligent environmental intelligence platform** that combines **geospatial data, live weather, air quality, satellite imagery, and autonomous AI agents** into one secure, production-grade product. Users monitor the world around them, manage projects and agents, and converse with AI assistants backed by interchangeable LLM providers — all served by a **FastAPI** backend and a **Next.js** frontend.
 
-> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, an 80-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
+> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, Prometheus metrics, a 120-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
 
 ---
 
@@ -27,6 +27,7 @@ AetherLab is an **intelligent environmental intelligence platform** that combine
 | **💬 Conversations** | Persistent per-project chat history with an LLM-powered reply flow |
 | **🌍 Environmental** | Ingest live weather (OpenWeather) & air quality (OpenAQ); query latest / historical / geofenced readings; optional Celery ingestion |
 | **🧩 AI Providers** | Pluggable `LLMProvider` abstraction (OpenAI impl) behind a factory. **Free Nemotron model via OpenRouter by default** |
+| **📈 Observability** | **Prometheus metrics** (`/metrics` scrape endpoint) with per-request counts & latency histograms, Sentry error/performance monitoring, JSON structured logging with request-ID correlation |
 | **🛡️ Hardening** | Rate limiting (slowapi), health-check liveness probes, CORS policy, JWT secret validation, sensitive-data log redaction |
 | **🖥️ Frontend** | Next.js 15 app for auth, dashboard, projects, agents, chat & environmental maps/gauges, with server-side auth middleware & error boundaries |
 | **⚙️ Ops** | Docker-ready, environment-aware config (dev/test/prod), Alembic migrations, GitHub Actions CI |
@@ -82,7 +83,7 @@ The system uses a **defense-in-depth, layered backend** with a separate frontend
 | Task queue | [Celery](https://docs.celeryq.dev/) | Optional scheduled environmental ingestion |
 | AI SDK | [OpenAI SDK](https://github.com/openai/openai-python) | Behind a provider abstraction |
 | Server | [uvicorn](https://www.uvicorn.org/) | ASGI server |
-| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 80-test suite |
+| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 120-test suite |
 
 ### Frontend
 
@@ -349,7 +350,7 @@ Limits are enforced with **slowapi** (shared in-memory limiter, keyed by client 
 
 Responses include the structured `429` body `{ "detail": "Rate limit exceeded", "code": "rate_limit_exceeded" }`.
 
-> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 80-test suite never trips a per-IP cap.
+> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 120-test suite never trips a per-IP cap.
 
 ---
 
@@ -433,11 +434,11 @@ environmental_readings   (independent weather + air-quality snapshots)
 
 ## 🧪 Testing
 
-A **80-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
+A **120-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
 
 ```bash
 cd backend
-python -m pytest                  # full suite (80 passed)
+python -m pytest                  # full suite (120 passed)
 python -m pytest tests/test_auth.py -v
 python -m pytest tests/test_projects.py tests/test_agents.py -v
 ```
@@ -456,6 +457,65 @@ Every push to `main` and every pull request triggers **two independent jobs** (`
 | **Frontend · typecheck + build** | ubuntu + Node 20 | `npm ci` → `tsc --noEmit` → `npm run build` |
 
 The CI step is safe on Windows-authored files: it fixes the PowerShell `pip freeze` encoding and filters Windows-only packages so the Linux runner can install the rest.
+
+---
+
+## 📈 Observability
+
+AetherLab ships three complementary observability layers: **Prometheus metrics**, **Sentry** error/performance monitoring, and **JSON structured logging** with request-ID correlation.
+
+### Prometheus metrics
+
+`app/core/metrics.py` instruments every HTTP request and exposes a scrape endpoint at **`GET /metrics`**:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `http_requests_total` | counter | `method`, `endpoint`, `status` | Total HTTP requests served |
+| `http_request_duration_seconds` | histogram | `method`, `endpoint` | Request latency distribution (bucketed) |
+
+Design highlights:
+
+- **Bounded cardinality** — labels use the *templated* route path (e.g. `/projects/{project_id}`) rather than raw URLs, so requesting 10 000 different project IDs produces one time series, not 10 000. Unrouted requests (404s) fall back to the raw path.
+- **No self-counting feedback loop** — `/metrics` is deliberately excluded from instrumentation, so scraping never inflates its own counters.
+- **Outermost middleware** — `register_metrics(app)` runs last in `main.py`, so Prometheus observes the full request lifecycle, including rate-limited `429` responses.
+- **Streaming-safe** — implemented as native ASGI middleware rather than `BaseHTTPMiddleware`, so the SSE reply stream passes through untouched and latency is measured without an extra thread-pool hop.
+- **Rate-limit exempt** — `/metrics` bypasses slowapi so frequent scrapes never trip a `429`.
+
+Scrape it locally:
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+Example output:
+
+```text
+# HELP http_requests_total Total HTTP requests, partitioned by method, endpoint and response status.
+# TYPE http_requests_total counter
+http_requests_total{endpoint="/",method="GET",status="200"} 1.0
+http_requests_total{endpoint="/projects/{project_id}",method="GET",status="401"} 1.0
+```
+
+Minimal `prometheus.yml` scrape job:
+
+```yaml
+scrape_configs:
+  - job_name: aetherlab-backend
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["localhost:8000"]
+```
+
+> ⚠️ **Production note:** `/metrics` is intentionally unauthenticated for simplicity. In hardened deployments bind it to an internal interface or protect it with a reverse proxy / network policy — it can leak endpoint topology and traffic volumes.
+
+### Sentry
+
+Activated only when `SENTRY_DSN` is configured (`init_sentry()` is otherwise a no-op), capturing exceptions, FastAPI/SQLAlchemy traces and log-level errors, with sensitive keys scrubbed and every event tagged with the request-scoped `request_id`.
+
+### Structured logging
+
+`app/core/logging.py` emits JSON logs with an `X-Request-ID` propagated through middleware and attached to Sentry events, so a single request's logs and errors are trivially correlated.
 
 ---
 

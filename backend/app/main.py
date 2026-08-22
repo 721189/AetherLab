@@ -10,6 +10,7 @@ from app.api.router import router
 from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
 from app.core.config import settings
 from app.core.logging import setup_logging, request_id_context
+from app.core.metrics import register_metrics
 from app.core.sentry import init_sentry
 from app.exceptions.handlers import register_exception_handlers
 
@@ -56,6 +57,12 @@ async def request_id_middleware(request: Request, call_next):
 
     response.headers["X-Request-ID"] = request_id
     return response
+
+
+# Register Prometheus metrics last so the middleware becomes the outermost
+# layer, counting every incoming request (including rate-limited 429s). The
+# ``GET /metrics`` endpoint is exempt from slowapi and is not self-counted.
+register_metrics(app)
 
 
 @app.get("/")
