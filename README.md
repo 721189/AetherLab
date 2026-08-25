@@ -13,7 +13,7 @@
 
 AetherLab is an **intelligent environmental intelligence platform** that combines **geospatial data, live weather, air quality, satellite imagery, and autonomous AI agents** into one secure, production-grade product. Users monitor the world around them, manage projects and agents, and converse with AI assistants backed by interchangeable LLM providers — all served by a **FastAPI** backend and a **Next.js** frontend.
 
-> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, Prometheus metrics, a 188-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
+> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, Prometheus metrics, a 218-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
 
 ---
 
@@ -25,7 +25,8 @@ AetherLab is an **intelligent environmental intelligence platform** that combine
 | **📁 Projects** | Create / list / update / soft-archive projects with strict data isolation between users |
 | **🤖 Agents** | Configure autonomous AI agents per project (model, temperature, system prompt, JSON config, lifecycle status) |
 | **💬 Conversations** | Persistent per-project chat history with an LLM-powered reply flow |
-| **🌍 Environmental** | Provider-adapter ingestion (**OpenAQ v3**, OpenWeather) normalised into a canonical `EnvironmentalObservation` model; **real EPA-breakpoint AQI**; query latest / historical / geofenced readings; **Celery + Redis scheduled ingestion every 15 min** (async service behind a sync task boundary) |
+| **🌍 Environmental** | Provider-adapter ingestion (**OpenAQ v3**, OpenWeather, **NASA POWER** satellite) normalised into a canonical `EnvironmentalObservation` model with full **provenance**; **real EPA-breakpoint AQI**; Redis-cached provider calls; user-owned `monitored_locations`; query latest / historical / geofenced readings; **Celery fan-out ingestion every 15 min** |
+| **🛡️ Abuse protection** | **Redis-backed distributed rate limiting** (shared across replicas) + provider response cache so repeat requests never re-hit paid APIs |
 | **🧩 AI Providers** | Pluggable `LLMProvider` abstraction (OpenAI impl) behind a factory. **Free Nemotron model via OpenRouter by default** |
 | **📈 Observability** | **Prometheus metrics** (`/metrics` scrape endpoint) with per-request counts & latency histograms, Sentry error/performance monitoring, JSON structured logging with request-ID correlation |
 | **🛡️ Hardening** | Rate limiting (slowapi), health-check liveness probes, CORS policy, JWT secret validation, sensitive-data log redaction |
@@ -83,7 +84,7 @@ The system uses a **defense-in-depth, layered backend** with a separate frontend
 | Task queue | [Celery](https://docs.celeryq.dev/) | Optional scheduled environmental ingestion |
 | AI SDK | [OpenAI SDK](https://github.com/openai/openai-python) | Behind a provider abstraction |
 | Server | [uvicorn](https://www.uvicorn.org/) | ASGI server |
-| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 188-test suite |
+| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 218-test suite |
 
 ### Frontend
 
@@ -366,7 +367,16 @@ Limits are enforced with **slowapi** (shared in-memory limiter, keyed by client 
 
 Responses include the structured `429` body `{ "detail": "Rate limit exceeded", "code": "rate_limit_exceeded" }`.
 
-> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 188-test suite never trips a per-IP cap.
+> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 218-test suite never trips a per-IP cap.
+>
+> **Test tiers** (markers in `pytest.ini`):
+>
+> | Tier | Marker | Runs | Purpose |
+> |------|--------|------|---------|
+> | Unit / API | *(default)* | every push | Hermetic SQLite + mocked providers |
+> | Integration | `-m integration` | needs `TEST_DATABASE_URL` | Real PostgreSQL: migrations, constraints, cascades, token rotation |
+> | Provider smoke | `-m smoke` | opt-in `RUN_PROVIDER_SMOKE=1` | Live OpenWeather/OpenAQ/NASA contract checks (consumes quota) |
+
 
 ---
 
@@ -451,7 +461,7 @@ environmental_readings   (independent weather + air-quality snapshots)
 
 ## 🧪 Testing
 
-A **188-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
+A **218-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
 
 ```bash
 cd backend

@@ -114,12 +114,20 @@ services:
       dockerfile: docker/Dockerfile
     restart: unless-stopped
     command: celery -A app.tasks.celery_app flower --port=5555
+    env_file:
+      - ../.env
     environment:
+      # Flower imports the Celery app, which imports Settings -- so it needs
+      # the same env contract as worker/beat (DATABASE_URL & SECRET_KEY are
+      # validated at import time; they come from ../.env via env_file).
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-aetherlab}
       REDIS_URL: redis://redis:6379/0
     ports:
       - "5555:5555"
     depends_on:
       redis:
+        condition: service_healthy
+      db:
         condition: service_healthy
 
 volumes:

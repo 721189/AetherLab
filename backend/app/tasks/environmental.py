@@ -118,21 +118,76 @@ def collect_location(
     return collect_for_location(lat, lon, location_name)
 
 
+def discover_locations() -> List[Dict[str, Any]]:
+    """Read enabled monitored locations from the database.
+
+    Falls back to :data:`DEFAULT_LOCATIONS` when the table is empty OR the
+    database is unreachable — a Beat tick must never crash because of a
+    transient DB blip; the platform defaults are always safe to collect.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    from app.repositories.monitored_location_repository import (
+        MonitoredLocationRepository,
+    )
+
+    db = _session()
+    try:
+        rows = MonitoredLocationRepository(db).get_enabled()
+        if not rows:
+            return list(DEFAULT_LOCATIONS)
+        return [
+            {
+                "lat": r.latitude,
+                "lon": r.longitude,
+                "name": r.name,
+                "location_id": r.id,
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.warning("Could not read monitored locations (%s); using defaults", exc)
+        return list(DEFAULT_LOCATIONS)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="app.tasks.environmental.collect_all_locations")
-def collect_all_locations(
-    locations: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
-    """Collect readings for every monitored location (Beat: every 15 min)."""
-    targets = locations or DEFAULT_LOCATIONS
-    results = [
-        collect_for_location(loc["lat"], loc["lon"], loc["name"]) for loc in targets
+def collect_all_locations() -> Dict[str, Any]:
+    """Discover enabled locations and FAN OUT one task per location.
+
+    Architecture:
+
+        Beat -> collect_all_locations -> discover_locations()
+              -> celery.group(collect_location.s(loc) for loc ...)
+
+    Each location runs as an independent task on the queue, so one failing
+    or slow location can never hold up the rest of the batch — the worker
+    pool processes them in parallel and failures are isolated per message.
+    Returns a dispatch summary; per-location outcomes land in Flower.
+    """
+    from celery import group
+
+    targets = discover_locations()
+    if not targets:
+        return {"dispatched": 0, "locations": []}
+
+    signatures = [
+        collect_location.signature(
+            kwargs={
+                "lat": t["lat"],
+                "lon": t["lon"],
+                "location_name": t["name"],
+            }
+        )
+        for t in targets
     ]
+    group(signatures).apply_async()
+
     return {
-        "locations": len(results),
-        "succeeded": sum(
-            1 for r in results if r.get("weather") or r.get("air_quality")
-        ),
-        "results": results,
+        "dispatched": len(signatures),
+        "locations": [t["name"] for t in targets],
     }
 
 

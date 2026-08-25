@@ -45,16 +45,30 @@ class EnvironmentalService:
         lon: float,
         location_name: str,
     ) -> Dict[str, Any]:
-        """Fetch current weather from OpenWeather via its adapter."""
+        """Fetch current weather from OpenWeather via its adapter.
+
+        Responses are cached by rounded coordinates so repeated requests
+        within the TTL never touch the paid provider.
+        """
+        from app.core.provider_cache import build_cache_key, get_cached, set_cached
+
+        key = build_cache_key("openweather", lat, lon)
+        cached = get_cached(key)
+        if cached is not None:
+            return {**cached, "location_name": location_name, "cached": True}
+
         try:
             observations = await self.weather_provider.fetch_latest(
                 lat, lon, location_name
             )
         except ProviderError as exc:
             return {"error": str(exc)}
-        return OpenWeatherProvider.to_reading_payload(
+        payload = OpenWeatherProvider.to_reading_payload(
             lat, lon, location_name, observations
         )
+        if "error" not in payload:
+            set_cached(key, payload)
+        return payload
 
     async def fetch_air_quality(
         self,
@@ -62,7 +76,14 @@ class EnvironmentalService:
         lon: float,
         location_name: str,
     ) -> Dict[str, Any]:
-        """Fetch air quality from OpenAQ v3 via its adapter."""
+        """Fetch air quality from OpenAQ v3 via its adapter (cached)."""
+        from app.core.provider_cache import build_cache_key, get_cached, set_cached
+
+        key = build_cache_key("openaq", lat, lon)
+        cached = get_cached(key)
+        if cached is not None:
+            return {**cached, "location_name": location_name, "cached": True}
+
         try:
             observations = await self.air_quality_provider.fetch_latest(
                 lat, lon, location_name
@@ -74,6 +95,7 @@ class EnvironmentalService:
         )
         if payload is None:
             return {"error": "No air quality data available"}
+        set_cached(key, payload)
         return payload
 
     def save_reading(self, data: Dict[str, Any]) -> EnvironmentalReading:

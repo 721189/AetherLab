@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Set the Secure attribute on auth cookies (enable behind HTTPS / prod).
     COOKIE_SECURE: bool = False
 
+    # TTL (seconds) for cached external-provider responses. Prevents redundant
+    # paid API calls for repeated/nearby coordinate requests.
+    PROVIDER_CACHE_TTL_SECONDS: int = 900
+
     # LLM configuration. OpenRouter hosts free Nemotron models and is preferred
     # when its API key is present. LLM_MODEL overrides the default model.
     OPENROUTER_API_KEY: str = ""

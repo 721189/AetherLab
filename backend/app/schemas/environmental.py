@@ -59,7 +59,12 @@ QualityFlag = Literal["verified", "unverified", "preliminary"]
 
 
 class EnvironmentalObservation(BaseModel):
-    """A single normalised measurement from any provider."""
+    """A single normalised measurement from any provider.
+
+    Provenance fields (dataset/product/processing_level/resolution/
+    acquisition_time) matter most for satellite sources — every observation
+    can answer "where exactly did this number come from?".
+    """
 
     source: SourceName
     variable: str = Field(description="Canonical variable, e.g. temperature, pm25")
@@ -68,11 +73,30 @@ class EnvironmentalObservation(BaseModel):
     latitude: float
     longitude: float
     location_name: Optional[str] = None
+
+    # --- Provenance -----------------------------------------------------
+    dataset: Optional[str] = Field(
+        default=None, description="Source dataset, e.g. Sentinel-5P OFFL/L3__NO2"
+    )
+    product: Optional[str] = Field(default=None, description="Product identifier")
+    processing_level: Optional[str] = Field(
+        default=None, description="Processing level, e.g. L2, L3"
+    )
+    resolution: Optional[str] = Field(
+        default=None, description="Spatial resolution, e.g. '5.5 km x 7 km'"
+    )
+    acquisition_time: Optional[datetime] = Field(
+        default=None, description="Satellite overpass / sensor acquisition time"
+    )
     observed_at: Optional[datetime] = Field(
         default=None, description="When the phenomenon was measured by the source"
     )
     retrieved_at: Optional[datetime] = Field(
         default=None, description="When we fetched it"
+    )
+    quality_flags: dict = Field(
+        default_factory=dict,
+        description="Provider-specific quality flags (cloud cover, QA values...)",
     )
     quality: QualityFlag = "unverified"
 

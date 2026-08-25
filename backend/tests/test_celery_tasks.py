@@ -170,28 +170,58 @@ def test_collect_location_executes_environmental_fetches(
         assert not inspect.iscoroutine(data)
 
 
-def test_collect_all_locations_aggregates_every_target(
+def test_collect_all_locations_fans_out_per_location(
     eager_celery, fake_db, monkeypatch
 ) -> None:
+    """Beat dispatches ONE independent task per location (no serial for-loop)."""
     from app.tasks.environmental import collect_all_locations
 
     custom = [
         {"lat": 1.0, "lon": 2.0, "name": "Alpha"},
         {"lat": 3.0, "lon": 4.0, "name": "Beta"},
     ]
-    summary = collect_all_locations.apply(args=(custom,)).get()
-    assert summary["locations"] == 2
-    assert summary["succeeded"] == 2
-    assert [r["location"] for r in summary["results"]] == ["Alpha", "Beta"]
+    monkeypatch.setattr(
+        __import__("app.tasks.environmental", fromlist=["x"]),
+        "discover_locations",
+        lambda: custom,
+    )
+
+    created, _ = fake_db
+    summary = collect_all_locations.apply().get()
+
+    # Dispatch summary returned to Beat/Flower...
+    assert summary["dispatched"] == 2
+    assert summary["locations"] == ["Alpha", "Beta"]
+    # ...and in eager mode each fanned-out task actually ran and persisted.
+    names = {d["location_name"] for d in created}
+    assert {"Alpha", "Beta"}.issubset(names)
+
+
+def test_collect_all_locations_discovers_from_the_database(
+    eager_celery, fake_db, monkeypatch
+) -> None:
+    from app.tasks import environmental as env_mod
+
+    calls = []
+
+    def fake_discover():
+        calls.append(1)
+        return [{"lat": 10.0, "lon": 20.0, "name": "DbCity"}]
+
+    monkeypatch.setattr(env_mod, "discover_locations", fake_discover)
+    summary = collect_all = env_mod.collect_all_locations.apply().get()
+    assert calls  # discovery was consulted, not the hardcoded defaults
+    assert collect_all["locations"] == ["DbCity"]
 
 
 def test_collect_all_locations_defaults_to_the_monitored_set(
     eager_celery, fake_db
 ) -> None:
+    """Empty/unavailable monitored_locations table -> platform defaults."""
     from app.tasks.environmental import DEFAULT_LOCATIONS, collect_all_locations
 
     summary = collect_all_locations.apply().get()
-    assert summary["locations"] == len(DEFAULT_LOCATIONS)
+    assert summary["locations"] == [loc["name"] for loc in DEFAULT_LOCATIONS]
 
 
 def test_provider_failure_does_not_abort_the_batch(eager_celery, monkeypatch) -> None:
