@@ -2,32 +2,42 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
-import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.environmental_reading import EnvironmentalReading
 from app.repositories.environmental_repository import EnvironmentalRepository
-
-OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
-OPENAQ_URL = "https://api.openaq.org/v2/latest"
+from app.services.providers.openaq_provider import OpenAQProvider
+from app.services.providers.base import ProviderError
+from app.services.providers.openweather_provider import OpenWeatherProvider
 
 
 class EnvironmentalService:
     """Fetch, transform and persist environmental readings.
 
-    The fetch methods here are kept deliberately thin and *pure* (no DB
-    writes); callers decide whether to persist, which makes them trivially
-    unit-testable without mocking the database.
+    All provider-specific logic lives in :mod:`app.services.providers`
+    adapters; this service orchestrates them and persists canonical results.
+    Fetch methods are async and *pure* (no DB writes); callers decide whether
+    to persist, which keeps them trivially unit-testable.
     """
 
     def __init__(self, db: Session):
         self.db = db
         self.repo = EnvironmentalRepository(db)
-        self.openweather_key = settings.OPENWEATHER_API_KEY or os.getenv(
-            "OPENWEATHER_API_KEY"
+        self.weather_provider = OpenWeatherProvider(
+            settings.OPENWEATHER_API_KEY or os.getenv("OPENWEATHER_API_KEY", "")
         )
-        self.openaq_key = settings.OPENAQ_API_KEY or os.getenv("OPENAQ_API_KEY")
+        self.air_quality_provider = OpenAQProvider(
+            settings.OPENAQ_API_KEY or os.getenv("OPENAQ_API_KEY", "")
+        )
+
+    @property
+    def openweather_key(self) -> str:
+        return self.weather_provider.api_key
+
+    @property
+    def openaq_key(self) -> str:
+        return self.air_quality_provider.api_key
 
     async def fetch_weather(
         self,
@@ -35,41 +45,16 @@ class EnvironmentalService:
         lon: float,
         location_name: str,
     ) -> Dict[str, Any]:
-        """Fetch current weather from OpenWeather (transformed payload)."""
-        if not self.openweather_key:
-            return {"error": "OPENWEATHER_API_KEY not set"}
-
-        params = {
-            "lat": lat,
-            "lon": lon,
-            "appid": self.openweather_key,
-            "units": "metric",
-        }
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(OPENWEATHER_URL, params=params)
-            data = response.json()
-
-        if response.status_code != 200:
-            return {"error": data.get("message", "Weather API error")}
-
-        main = data.get("main", {})
-        wind = data.get("wind", {})
-        weather_list = data.get("weather") or [{}]
-
-        return {
-            "location_name": location_name,
-            "lat": lat,
-            "lon": lon,
-            "temperature": main.get("temp"),
-            "feels_like": main.get("feels_like"),
-            "humidity": main.get("humidity"),
-            "wind_speed": wind.get("speed"),
-            "wind_direction": wind.get("deg"),
-            "pressure": main.get("pressure"),
-            "uv_index": data.get("uv_index"),
-            "weather_description": weather_list[0].get("description"),
-            "source": "openweather",
-        }
+        """Fetch current weather from OpenWeather via its adapter."""
+        try:
+            observations = await self.weather_provider.fetch_latest(
+                lat, lon, location_name
+            )
+        except ProviderError as exc:
+            return {"error": str(exc)}
+        return OpenWeatherProvider.to_reading_payload(
+            lat, lon, location_name, observations
+        )
 
     async def fetch_air_quality(
         self,
@@ -77,69 +62,19 @@ class EnvironmentalService:
         lon: float,
         location_name: str,
     ) -> Dict[str, Any]:
-        """Fetch air quality from OpenAQ (transformed payload)."""
-        if not self.openaq_key:
-            return {"error": "OPENAQ_API_KEY not set"}
-
-        params = {
-            "coordinates": f"{lat},{lon}",
-            "radius": 1000,
-            "limit": 1,
-        }
-        headers = {"X-API-Key": self.openaq_key}
-
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(OPENAQ_URL, params=params, headers=headers)
-            data = response.json()
-
-        if response.status_code != 200:
-            return {"error": data.get("message", "OpenAQ API error")}
-
-        results = data.get("results") or []
-        if not results:
+        """Fetch air quality from OpenAQ v3 via its adapter."""
+        try:
+            observations = await self.air_quality_provider.fetch_latest(
+                lat, lon, location_name
+            )
+        except ProviderError as exc:
+            return {"error": str(exc)}
+        payload = OpenAQProvider.to_reading_payload(
+            lat, lon, location_name, observations
+        )
+        if payload is None:
             return {"error": "No air quality data available"}
-
-        pollutants: Dict[str, float] = {}
-        for reading in (results[0].get("measurements") or []):
-            parameter = reading.get("parameter")
-            value = reading.get("value")
-            if parameter and value is not None:
-                pollutants[parameter] = value
-
-        return {
-            "location_name": location_name,
-            "lat": lat,
-            "lon": lon,
-            "aqi": self._calculate_aqi(pollutants),
-            "pm25": pollutants.get("pm25"),
-            "pm10": pollutants.get("pm10"),
-            "no2": pollutants.get("no2"),
-            "o3": pollutants.get("o3"),
-            "co": pollutants.get("co"),
-            "so2": pollutants.get("so2"),
-            "source": "openaq",
-        }
-
-    @staticmethod
-    def _calculate_aqi(pollutants: Dict[str, float]) -> Optional[int]:
-        """Compute a simplified US AQI from pollutant concentrations.
-
-        The true EPA breakpoints are non-linear; this linear approximation is
-        used as a placeholder until a full AQI implementation (e.g. the
-        `AQI` python package or EPA tables) is wired in.
-        """
-        if not pollutants:
-            return None
-
-        aqi = 0
-        if pollutants.get("pm25"):
-            aqi = max(aqi, int(pollutants["pm25"] * 0.5))
-        if pollutants.get("pm10"):
-            aqi = max(aqi, int(pollutants["pm10"] * 0.3))
-        if pollutants.get("no2"):
-            aqi = max(aqi, int(pollutants["no2"] * 0.5))
-
-        return min(aqi, 500) if aqi > 0 else None
+        return payload
 
     def save_reading(self, data: Dict[str, Any]) -> EnvironmentalReading:
         """Persist a single reading (skips error payloads)."""
@@ -165,3 +100,4 @@ class EnvironmentalService:
     ) -> list[EnvironmentalReading]:
         cutoff = datetime.now() - timedelta(hours=hours)
         return self.repo.get_by_location_since(location_name, cutoff)
+

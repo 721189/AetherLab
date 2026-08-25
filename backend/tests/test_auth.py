@@ -13,7 +13,9 @@ def register(client, **overrides):
 
 
 class TestRegister:
-    def test_register_creates_user(self, client):
+    def test_register_creates_user_and_sends_email(self, client):
+        from app.services.email_provider import OUTBOX
+
         resp, payload = register(client)
         assert resp.status_code == 201
         body = resp.json()
@@ -21,11 +23,14 @@ class TestRegister:
         assert user["id"] == 1
         # email is normalized to lowercase
         assert user["email"] == "alice@example.com"
-        # a verification token is issued for the new account
-        assert body["verification_token"]
+        # SECURITY: the verification token must NEVER be exposed via the API;
+        # it is delivered exclusively by email.
+        assert "verification_token" not in body
         # password must never be returned
         assert "hashed_password" not in body
         assert "password" not in body
+        # A verification email was dispatched through the provider.
+        assert any("alice@example.com" == m["to"] for m in OUTBOX)
 
     def test_register_rejects_weak_password(self, client):
         resp, _ = register(client, password="short")

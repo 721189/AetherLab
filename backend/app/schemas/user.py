@@ -60,13 +60,13 @@ class EmailSchema(BaseModel):
 
 class UserRegisterResponse(BaseModel):
     user: UserResponse
-    verification_token: str
-    message: str = "Account created. Please verify your email."
+    message: str = (
+        "Account created. If the address is valid, a verification email has been sent."
+    )
 
 
 class VerificationResponse(BaseModel):
     message: str
-    verification_token: str | None = None
 
 
 class Token(BaseModel):

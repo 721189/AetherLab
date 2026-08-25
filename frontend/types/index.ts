@@ -18,13 +18,11 @@ export interface User {
 
 export interface UserRegisterResponse {
   user: User;
-  verification_token: string;
   message: string;
 }
 
 export interface VerificationResponse {
   message: string;
-  verification_token?: string;
 }
 
 export interface Project {

@@ -20,6 +20,7 @@ from app.models.user import User
 from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate
+from app.services.email_provider import EmailProvider, get_email_provider
 
 
 class AuthService:
@@ -29,9 +30,11 @@ class AuthService:
         self,
         repo: UserRepository,
         refresh_repo: RefreshTokenRepository | None = None,
+        email_provider: EmailProvider | None = None,
     ):
         self.repo = repo
         self.refresh_repo = refresh_repo or RefreshTokenRepository(repo.db)
+        self.email_provider = email_provider or get_email_provider()
 
     # ------------------------------------------------------------------
     # Email verification helpers
@@ -48,12 +51,11 @@ class AuthService:
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
-    def register(self, user: UserCreate) -> tuple[User, str]:
-        """Register a new user and return ``(user, verification_token)``.
+    def register(self, user: UserCreate) -> User:
+        """Register a new user and send them a verification email.
 
-        The account is created unverified; the caller is responsible for
-        delivering the verification token to the user (via email in
-        production, or returned to the client in development).
+        The raw token NEVER leaves the server: it exists transiently to build
+        the emailed link; only its SHA-256 hash is persisted.
         """
         if self.repo.get_by_email(user.email):
             raise ConflictError(detail="Email already registered")
@@ -65,7 +67,8 @@ class AuthService:
         db_user.email_verification_sent_at = datetime.now(timezone.utc)
         db_user = self.repo.commit_refresh(db_user)
 
-        return db_user, token
+        self._send_verification_email(db_user.email, token)
+        return db_user
 
     # ------------------------------------------------------------------
     # Login
@@ -193,7 +196,7 @@ class AuthService:
         user.email_verification_sent_at = None
         return self.repo.commit_refresh(user)
 
-    def resend_verification(self, email: str) -> str:
+    def resend_verification(self, email: str) -> None:
         """Re-issue a verification token for an existing unverified account."""
         user = self.repo.get_by_email(email)
         if not user:
@@ -204,4 +207,41 @@ class AuthService:
         user.email_verification_sent_at = datetime.now(timezone.utc)
         self.repo.commit_refresh(user)
 
-        return token
+        self._send_verification_email(user.email, token)
+
+    # ------------------------------------------------------------------
+    # Session revocation
+    # ------------------------------------------------------------------
+    def revoke_session(self, refresh_token: str) -> None:
+        """Revoke the whole refresh-token family for a presented token."""
+        try:
+            row = self.refresh_repo.get_by_token_hash(hash_token(refresh_token))
+        except Exception:
+            return
+        if row is None:
+            return
+        now = datetime.now(timezone.utc)
+        self.refresh_repo.revoke_family(row.family_id, now)
+        self.refresh_repo.commit()
+
+    # ------------------------------------------------------------------
+    # Email delivery boundary
+    # ------------------------------------------------------------------
+    def _send_verification_email(self, to_email: str, token: str) -> None:
+        """Send through the configured provider.
+
+        ``asyncio.run`` is safe here because these service methods are invoked
+        from synchronous FastAPI endpoints (threadpool workers, no running
+        event loop). Delivery failures do NOT roll back registration — the
+        account exists and the token can be re-sent via /resend-verification.
+        """
+        import asyncio
+
+        try:
+            asyncio.run(self.email_provider.send_verification_email(to_email, token))
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to deliver verification email to %s", to_email
+            )

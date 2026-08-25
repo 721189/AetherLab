@@ -59,6 +59,9 @@ class TestCreateAgent:
         assert body["is_public"] is False
 
     def test_requires_authentication(self, client, setup):
+        # Cookie auth: drop the session cookies from setup's login to
+        # simulate a genuinely unauthenticated browser.
+        client.cookies.clear()
         resp = client.post(
             f"/api/v1/projects/{setup['project_id']}/agents",
             json={"name": "No auth"},

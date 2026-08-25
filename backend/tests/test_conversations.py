@@ -109,6 +109,9 @@ class TestCreateConversation:
         assert resp.json()["project_id"] == setup["project_id"]
 
     def test_requires_authentication(self, client, setup):
+        # Cookie auth: drop the session cookies from setup's login to
+        # simulate a genuinely unauthenticated browser.
+        client.cookies.clear()
         resp = client.post(
             f"/api/v1/projects/{setup['project_id']}/conversations",
             json={"title": "No Auth"},
@@ -409,6 +412,7 @@ class TestStreamMessage:
         assert body["pagination"]["total"] == 2
 
     def test_stream_requires_authentication(self, client, setup, fake_llm):
+        client.cookies.clear()  # simulate an unauthenticated browser
         conv = create_conversation(client, setup["token"], setup["project_id"])
         base = (
             f"/api/v1/projects/{setup['project_id']}"

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,4 +44,35 @@ class EnvironmentalSummary(BaseModel):
     aqi: Optional[int] = None
     pm25: Optional[float] = None
     recorded_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Canonical provider-independent observation model.
+#
+# Every provider adapter (OpenAQ v3, OpenWeather, NASA, Copernicus, ...)
+# normalises its raw JSON into EnvironmentalObservation records so downstream
+# consumers never see provider-specific payloads.
+# ---------------------------------------------------------------------------
+
+SourceName = Literal["openweather", "openaq", "nasa", "copernicus", "manual"]
+QualityFlag = Literal["verified", "unverified", "preliminary"]
+
+
+class EnvironmentalObservation(BaseModel):
+    """A single normalised measurement from any provider."""
+
+    source: SourceName
+    variable: str = Field(description="Canonical variable, e.g. temperature, pm25")
+    value: Optional[float] = Field(default=None, description="Measured value")
+    unit: str = Field(description="Unit of measure, e.g. celsius, ug/m3")
+    latitude: float
+    longitude: float
+    location_name: Optional[str] = None
+    observed_at: Optional[datetime] = Field(
+        default=None, description="When the phenomenon was measured by the source"
+    )
+    retrieved_at: Optional[datetime] = Field(
+        default=None, description="When we fetched it"
+    )
+    quality: QualityFlag = "unverified"
 

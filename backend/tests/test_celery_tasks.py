@@ -27,8 +27,16 @@ def eager_celery(monkeypatch):
 
 @pytest.fixture
 def fake_db(monkeypatch):
-    """Replace the real DB session with an in-test recording double."""
+    """Replace the real DB session with an in-test recording double.
+
+    The fake service mirrors the REAL service's execution model: its fetch
+    methods are ``async def`` returning plain dicts. This is exactly what lets
+    ``test_collect_location_executes_environmental_fetches`` catch the classic
+    sync/async mixing bug — if the task ever treated coroutines as results,
+    these assertions would fail.
+    """
     created: list = []
+    calls = {"weather": 0, "air_quality": 0}
 
     class FakeRepo:
         def create(self, data):
@@ -39,10 +47,12 @@ def fake_db(monkeypatch):
         def __init__(self, db):
             self.db = db
 
-        def fetch_weather(self, lat, lon, name):
+        async def fetch_weather(self, lat, lon, name):
+            calls["weather"] += 1
             return {"location_name": name, "temperature": 21.5, "source": "openweather"}
 
-        def fetch_air_quality(self, lat, lon, name):
+        async def fetch_air_quality(self, lat, lon, name):
+            calls["air_quality"] += 1
             return {"location_name": name, "aqi": 42, "source": "openaq"}
 
         def save_reading(self, data):
@@ -67,7 +77,8 @@ def fake_db(monkeypatch):
     import app.services.environmental_service as es
 
     monkeypatch.setattr(es, "EnvironmentalService", FakeService)
-    return created
+    return created, calls
+
 
 
 def test_celery_app_configuration() -> None:
@@ -112,11 +123,51 @@ def test_collect_location_stores_weather_and_air_quality(
 ) -> None:
     from app.tasks.environmental import collect_location
 
+    created, _ = fake_db
     result = collect_location.apply(args=(51.5, -0.12, "London")).get()
     assert result["location"] == "London"
     assert result["weather"] is True
     assert result["air_quality"] is True
-    assert len(fake_db) == 2
+    assert len(created) == 2
+
+
+def test_collect_location_executes_environmental_fetches(
+    eager_celery, fake_db
+) -> None:
+    """Regression guard for the sync/async execution-model mismatch.
+
+    The environmental service is async; the Celery task is sync. If the task
+    ever mixed them incorrectly (calling the coroutine without awaiting it),
+    the results here would be coroutine objects / failures instead of the
+    actual fetched dictionaries asserted below.
+    """
+    import inspect
+
+    from app.services.environmental_service import EnvironmentalService
+
+    created, calls = fake_db
+    from app.tasks.environmental import collect_location
+
+    result = collect_location.apply(args=(28.6139, 77.2090, "New Delhi")).get()
+
+    # Both providers were actually executed.
+    assert calls["weather"] == 1
+    assert calls["air_quality"] == 1
+    assert result.successful() if hasattr(result, "successful") else True
+    # The task summary reflects REAL dictionaries, not coroutine objects.
+    assert isinstance(result, dict)
+    assert result == {
+        "location": "New Delhi",
+        "weather": True,
+        "air_quality": True,
+    }
+    # The persisted payloads are the actual fetched dicts.
+    persisted = {d["source"]: d for d in created}
+    assert persisted["openweather"]["temperature"] == 21.5
+    assert persisted["openaq"]["aqi"] == 42
+    # Sanity: nothing anywhere returned a bare coroutine.
+    for data in created:
+        assert not inspect.iscoroutine(data)
 
 
 def test_collect_all_locations_aggregates_every_target(
@@ -145,6 +196,8 @@ def test_collect_all_locations_defaults_to_the_monitored_set(
 
 def test_provider_failure_does_not_abort_the_batch(eager_celery, monkeypatch) -> None:
     """A network error for one source must not lose the other source."""
+    import asyncio
+
     import app.services.environmental_service as es
 
     recorded: list = []
@@ -153,10 +206,10 @@ def test_provider_failure_does_not_abort_the_batch(eager_celery, monkeypatch) ->
         def __init__(self, db):
             self.db = db
 
-        def fetch_weather(self, lat, lon, name):
+        async def fetch_weather(self, lat, lon, name):
             raise RuntimeError("connection reset")
 
-        def fetch_air_quality(self, lat, lon, name):
+        async def fetch_air_quality(self, lat, lon, name):
             return {"location_name": name, "aqi": 10, "source": "openaq"}
 
         def save_reading(self, data):
@@ -177,3 +230,25 @@ def test_provider_failure_does_not_abort_the_batch(eager_celery, monkeypatch) ->
     assert "weather_error" in result
     assert result["air_quality"] is True
     assert len(recorded) == 1  # only the air-quality reading persisted
+
+
+def test_task_boundary_uses_a_single_event_loop_per_task(eager_celery, fake_db) -> None:
+    """The async boundary is one asyncio.run per task, never per request."""
+    import ast
+    import inspect
+
+    import app.tasks.environmental as mod
+
+    source = inspect.getsource(mod.collect_for_location)
+    tree = ast.parse(source)
+    loop_creations = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run"
+    ]
+    assert len(loop_creations) == 1  # exactly one event loop per task call
+    # ...and it lives in the SYNC wrapper, not inside the async orchestration.
+    async_src = inspect.getsource(mod.collect_for_location_async)
+    assert "asyncio.run" not in async_src

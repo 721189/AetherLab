@@ -11,18 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from app.services.environmental_service import EnvironmentalService
 
 
-@pytest.fixture
-def db_session(db_engine):
-    """Session bound to the same in-memory engine the app uses, so data
-    inserted here is visible to requests made via the TestClient."""
-    session_factory = sessionmaker(
-        bind=db_engine, autocommit=False, autoflush=False
-    )
-    session = session_factory()
-    yield session
-    session.close()
-
-
 def seed_readings(db_session, location_name="Delhi", count=3):
     svc = EnvironmentalService(db_session)
     for i in range(count):
@@ -84,27 +72,42 @@ class TestRepositoryPersistence:
 
 
 class TestAQICalculation:
-    def test_simplified_aqi(self):
-        calc = EnvironmentalService._calculate_aqi
-        assert calc({"pm25": 80}) == 40
-        assert calc({"pm10": 100}) == 30
-        assert calc({}) is None
-        # Clamped at 500.
-        assert calc({"pm25": 5000}) == 500
-        # Takes the max across pollutants.
-        assert calc({"pm25": 100, "no2": 120}) == 60
+    """Backwards-compatibility checks — the real methodology lives in
+    app/core/aqi.py and has its own dedicated suite in test_aqi.py."""
+
+    def test_service_uses_epa_breakpoint_method(self):
+        from app.core.aqi import calculate_overall_aqi
+
+        # PM2.5 150 ug/m3 -> sub-index ~186 dominates.
+        assert (
+            calculate_overall_aqi({"pm25": 150.0, "pm10": 40.0})
+            == calculate_overall_aqi({"pm25": 150.0})
+            > 100
+        )
+        # No usable pollutants -> None.
+        assert calculate_overall_aqi({}) is None
 
 
 class TestWeatherNoKey:
     def test_fetch_weather_without_key_returns_error(self):
-        svc = EnvironmentalService.__new__(EnvironmentalService)
-        svc.openweather_key = ""
-        # Call the synchronous wrapper by invoking the coroutine directly via
-        # the event loop pytest provides through anyio.
         import asyncio
 
+        from app.services.providers.openweather_provider import OpenWeatherProvider
+
+        svc = EnvironmentalService.__new__(EnvironmentalService)
+        svc.weather_provider = OpenWeatherProvider("")
         result = asyncio.run(svc.fetch_weather(1.0, 2.0, "X"))
         assert result == {"error": "OPENWEATHER_API_KEY not set"}
+
+    def test_fetch_air_quality_without_key_returns_error(self):
+        import asyncio
+
+        from app.services.providers.openaq_provider import OpenAQProvider
+
+        svc = EnvironmentalService.__new__(EnvironmentalService)
+        svc.air_quality_provider = OpenAQProvider("")
+        result = asyncio.run(svc.fetch_air_quality(1.0, 2.0, "X"))
+        assert result == {"error": "OPENAQ_API_KEY not set"}
 
 
 class TestEndpoints:

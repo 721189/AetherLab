@@ -47,3 +47,10 @@ export async function resendVerification(
 export async function me(): Promise<User> {
   return apiFetch<User>("/api/v1/auth/me");
 }
+
+export async function logout(): Promise<{ message: string }> {
+  // Expires the HttpOnly cookies server-side; the JSON body is informational.
+  return apiFetch<{ message: string }>("/api/v1/auth/logout", {
+    method: "POST",
+  }, false);
+}

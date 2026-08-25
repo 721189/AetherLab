@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     OPENWEATHER_API_KEY: str = ""
     OPENAQ_API_KEY: str = ""
 
+    # Email verification delivery. When RESEND_API_KEY is empty the console
+    # provider is used (emails are logged + captured in an in-memory outbox).
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "AetherLab <no-reply@aetherlab.app>"
+    # Base URL used in verification links emailed to users.
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
+    # Set the Secure attribute on auth cookies (enable behind HTTPS / prod).
+    COOKIE_SECURE: bool = False
+
     # LLM configuration. OpenRouter hosts free Nemotron models and is preferred
     # when its API key is present. LLM_MODEL overrides the default model.
     OPENROUTER_API_KEY: str = ""

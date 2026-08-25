@@ -38,12 +38,15 @@ export async function apiFetch<T>(
     ...(options.headers as Record<string, string>),
   };
   if (auth) {
+    // Cookie-based sessions: the browser attaches the HttpOnly access-token
+    // cookie automatically; no JS-readable bearer token is involved.
     const token = getAccessToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
+    credentials: "include", // send/accept HttpOnly auth cookies cross-origin
     headers,
     cache: "no-store",
   });

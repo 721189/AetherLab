@@ -43,6 +43,18 @@ def override_get_db(db_engine):
 
 
 @pytest.fixture
+def db_session(db_engine):
+    """Session bound to the same in-memory engine the app uses, so data
+    inserted here is visible to requests made via the TestClient."""
+    session_factory = sessionmaker(
+        bind=db_engine, autocommit=False, autoflush=False
+    )
+    session = session_factory()
+    yield session
+    session.close()
+
+
+@pytest.fixture
 def client(override_get_db):
     with TestClient(app) as c:
         yield c
@@ -75,21 +87,29 @@ def register_and_verify(client, email, password="StrongPass123!"):
 
     Returns ``(access_token, payload)`` where payload is ``{"email", "password"}``.
 
-    Verification is done through the real ``/api/v1/auth/verify/{token}``
-    endpoint rather than by writing to the DB directly. The ``client`` fixture
-    overrides ``get_db`` with an in-memory SQLite engine, so any direct
-    ``SessionLocal()`` access would hit the real PostgreSQL database — using the
-    endpoint guarantees the write lands in the same test DB and additionally
-    exercises the real verification flow.
+    The register endpoint NO LONGER returns a verification token (it is only
+    ever emailed), so the raw token is read back from the console email
+    provider's captured outbox — exactly what a real inbox would receive.
     """
+    from app.services.email_provider import OUTBOX
+
+    outbox_len_before = len(OUTBOX)
+
     # Register (email is normalised to lowercase by the API).
     reg = client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": password},
     )
     assert reg.status_code == 201, reg.text
-    verification_token = reg.json().get("verification_token")
-    assert verification_token, "Expected a verification_token in register response"
+    body = reg.json()
+    # Security invariant: the token must never appear in an API response.
+    assert "verification_token" not in body
+
+    # Extract the token from the "email" that was just sent.
+    assert len(OUTBOX) > outbox_len_before, "Expected a verification email to be sent"
+    sent = OUTBOX[-1]
+    verification_token = sent["body"].split("token=")[1].splitlines()[0].strip()
+    assert verification_token, "Verification link missing its token"
 
     # Verify via the API against the same overridden test database.
     ver = client.get(f"/api/v1/auth/verify/{verification_token}")

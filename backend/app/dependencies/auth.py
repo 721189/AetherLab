@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -11,19 +11,36 @@ from app.repositories.user_repository import UserRepository
 
 security = HTTPBearer(auto_error=False)
 
+# Name of the HttpOnly cookie holding the access token (set at /auth/login).
+ACCESS_TOKEN_COOKIE = "access_token"
+
+
+def _resolve_token(
+    credentials: Optional[HTTPAuthorizationCredentials],
+    request: Optional[Request],
+) -> Optional[str]:
+    """Prefer the Authorization header; fall back to the HttpOnly cookie."""
+    if credentials:
+        return credentials.credentials
+    if request is not None:
+        return request.cookies.get(ACCESS_TOKEN_COOKIE)
+    return None
+
 
 def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
-    if not credentials:
+    token = _resolve_token(credentials, request)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = decode_access_token(credentials.credentials)
+    payload = decode_access_token(token)
     email: str = payload.get("sub")
 
     if not email:
@@ -47,14 +64,16 @@ def get_current_user(
 
 
 def get_optional_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
-    if not credentials:
+    token = _resolve_token(credentials, request)
+    if not token:
         return None
 
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_access_token(token)
     except HTTPException:
         return None
 

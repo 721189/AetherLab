@@ -13,7 +13,7 @@
 
 AetherLab is an **intelligent environmental intelligence platform** that combines **geospatial data, live weather, air quality, satellite imagery, and autonomous AI agents** into one secure, production-grade product. Users monitor the world around them, manage projects and agents, and converse with AI assistants backed by interchangeable LLM providers — all served by a **FastAPI** backend and a **Next.js** frontend.
 
-> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, Prometheus metrics, a 129-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
+> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, Prometheus metrics, a 188-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
 
 ---
 
@@ -21,11 +21,11 @@ AetherLab is an **intelligent environmental intelligence platform** that combine
 
 | Domain | Capabilities |
 |--------|--------------|
-| **🔐 Identity** | Register → email verification → login → **rotating refresh tokens** with reuse detection. bcrypt hashing, strict password policy, per-user ownership & access control |
+| **🔐 Identity** | Register → **verification email** (token never exposed via API) → login → **HttpOnly cookie sessions** + **rotating refresh tokens** with reuse detection. bcrypt hashing, strict password policy, per-user ownership & access control |
 | **📁 Projects** | Create / list / update / soft-archive projects with strict data isolation between users |
 | **🤖 Agents** | Configure autonomous AI agents per project (model, temperature, system prompt, JSON config, lifecycle status) |
 | **💬 Conversations** | Persistent per-project chat history with an LLM-powered reply flow |
-| **🌍 Environmental** | Ingest live weather (OpenWeather) & air quality (OpenAQ); query latest / historical / geofenced readings; **Celery + Redis scheduled ingestion every 15 min** |
+| **🌍 Environmental** | Provider-adapter ingestion (**OpenAQ v3**, OpenWeather) normalised into a canonical `EnvironmentalObservation` model; **real EPA-breakpoint AQI**; query latest / historical / geofenced readings; **Celery + Redis scheduled ingestion every 15 min** (async service behind a sync task boundary) |
 | **🧩 AI Providers** | Pluggable `LLMProvider` abstraction (OpenAI impl) behind a factory. **Free Nemotron model via OpenRouter by default** |
 | **📈 Observability** | **Prometheus metrics** (`/metrics` scrape endpoint) with per-request counts & latency histograms, Sentry error/performance monitoring, JSON structured logging with request-ID correlation |
 | **🛡️ Hardening** | Rate limiting (slowapi), health-check liveness probes, CORS policy, JWT secret validation, sensitive-data log redaction |
@@ -83,7 +83,7 @@ The system uses a **defense-in-depth, layered backend** with a separate frontend
 | Task queue | [Celery](https://docs.celeryq.dev/) | Optional scheduled environmental ingestion |
 | AI SDK | [OpenAI SDK](https://github.com/openai/openai-python) | Behind a provider abstraction |
 | Server | [uvicorn](https://www.uvicorn.org/) | ASGI server |
-| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 129-test suite |
+| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 188-test suite |
 
 ### Frontend
 
@@ -239,19 +239,33 @@ AetherLab uses a **short-lived access token + rotating refresh token** model wit
 sequenceDiagram
     participant C as Client
     participant A as Auth API
+    participant E as EmailProvider
     participant D as Database
     C->>A: POST /auth/register
     A->>D: create user (is_verified=false)
-    A-->>C: 201 + verification_token
+    A->>D: store SHA-256(token) + sent-at
+    A->>E: send verification link (raw token ONLY here)
+    A-->>C: 201 { user, message }  ← no token in response
     C->>A: GET /auth/verify/{token}
-    A->>D: set is_verified=true
+    A->>D: hash lookup + expiry check → is_verified=true
     A-->>C: 200
     C->>A: POST /auth/login
-    A-->>C: { access_token, refresh_token }
+    A-->>C: JSON body + Set-Cookie: HttpOnly access_token & refresh_token
     C->>A: POST /auth/refresh
     A->>D: revoke old, issue new (same family)
-    A-->>C: { access_token, refresh_token }
+    A-->>C: rotated pair (+ rotated cookies)
 ```
+
+### Token delivery — HttpOnly cookies
+
+Browser sessions never expose the secret to JavaScript:
+
+| Cookie | Attributes |
+|--------|------------|
+| `access_token` | `HttpOnly`, `Secure` (prod), `SameSite=Lax`, `Path=/` |
+| `refresh_token` | `HttpOnly`, `Secure` (prod), `SameSite=Lax`, `Path=/api/v1/auth` (auth endpoints only) |
+
+The Next.js middleware validates `/dashboard/*` by forwarding cookies to the backend's `GET /auth/me` — presence of a cookie alone is never treated as authentication. Non-browser API consumers can still use `Authorization: Bearer <access_token>`.
 
 ### Security controls
 
@@ -260,7 +274,8 @@ sequenceDiagram
 | **Password hashing** | bcrypt via passlib; constant-time verification |
 | **Password policy** | ≥ 12 chars, upper + lower + digit + special |
 | **Email normalization** | Trim + lowercase before storage/lookup |
-| **Email verification** | Account cannot log in until verified (`login` returns `401 Email not verified`) |
+| **Email verification** | Account cannot log in until verified (`login` returns `401 Email not verified`). Raw token exists only inside the emailed link; only its SHA-256 hash is stored |
+| **Email provider** | Pluggable `EmailProvider` interface — console/dev outbox by default, Resend when `RESEND_API_KEY` is set |
 | **Access token** | Signed JWT (`HS256`), 30-min default lifetime |
 | **Refresh token** | Signed JWT with `type=refresh`, `family`, `jti` claims; **stored SHA-256 hashed**, never plaintext |
 | **Rotation + reuse detection** | Using a refresh token revokes it and issues a new one in the same family. **Replaying an already-rotated token revokes the entire family** (theft signal) |
@@ -275,11 +290,12 @@ sequenceDiagram
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| `POST` | `/api/v1/auth/register` | ❌ | Create account → returns `verification_token` |
-| `GET` | `/api/v1/auth/verify/{token}` | ❌ | Confirm email, unlock login |
-| `POST` | `/api/v1/auth/resend-verification` | ❌ | Re-issue a verification token |
-| `POST` | `/api/v1/auth/login` | ❌ | Issue `{ access_token, refresh_token }` |
-| `POST` | `/api/v1/auth/refresh` | ✅ | Rotate the refresh token |
+| `POST` | `/api/v1/auth/register` | ❌ | Create account → verification email sent (no token in response) |
+| `GET` | `/api/v1/auth/verify/{token}` | ❌ | Confirm email from the emailed link, unlock login |
+| `POST` | `/api/v1/auth/resend-verification` | ❌ | Re-send the verification email |
+| `POST` | `/api/v1/auth/login` | ❌ | Issue token pair + set HttpOnly cookies |
+| `POST` | `/api/v1/auth/refresh` | ✅ | Rotate the refresh token (body or cookie) |
+| `POST` | `/api/v1/auth/logout` | ❌ | Clear auth cookies + revoke session server-side |
 | `GET` | `/api/v1/auth/me` | ✅ | Current user profile |
 
 ---
@@ -350,7 +366,7 @@ Limits are enforced with **slowapi** (shared in-memory limiter, keyed by client 
 
 Responses include the structured `429` body `{ "detail": "Rate limit exceeded", "code": "rate_limit_exceeded" }`.
 
-> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 129-test suite never trips a per-IP cap.
+> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 188-test suite never trips a per-IP cap.
 
 ---
 
@@ -359,16 +375,17 @@ Responses include the structured `429` body `{ "detail": "Rate limit exceeded", 
 ```bash
 BASE=http://localhost:8000/api/v1
 
-# 1. Register (returns a verification_token)
+# 1. Register → a verification link is emailed to the address
+#    (in dev the console provider prints it; in prod set RESEND_API_KEY)
 curl -X POST $BASE/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"you@example.com","password":"StrongPass123!"}'
 
-# 2. Verify email (replaces the placeholder with the token above)
-curl "$BASE/auth/verify/<verification_token>"
+# 2. Verify email using the token from the emailed link
+curl "$BASE/auth/verify/<token_from_email>"
 
-# 3. Login → access + refresh tokens
-curl -X POST $BASE/auth/login \
+# 3. Login → access + refresh tokens AND HttpOnly cookies
+curl -c cookies.txt -X POST $BASE/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"you@example.com","password":"StrongPass123!"}'
 # → {"access_token":"...","refresh_token":"...","token_type":"bearer"}
@@ -434,7 +451,7 @@ environmental_readings   (independent weather + air-quality snapshots)
 
 ## 🧪 Testing
 
-A **129-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
+A **188-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
 
 ```bash
 cd backend

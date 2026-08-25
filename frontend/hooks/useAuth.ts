@@ -41,15 +41,11 @@ export function useRegister() {
   return useMutation({
     mutationFn: ({ email, password }: { email: string; password: string }) =>
       authApi.register({ email, password }),
-    onSuccess: async (resp) => {
-      // The backend returns the verification token directly (dev convenience).
-      // In production this step happens via the email link the user receives.
-      try {
-        await authApi.verifyEmail(resp.verification_token);
-        toast.success("Account created and email verified. Sign in.");
-      } catch {
-        toast.success("Account created — please verify your email.");
-      }
+    onSuccess: () => {
+      // The verification link arrives by email; there is no auto-verify step.
+      toast.success(
+        "Account created — check your inbox to verify your email before signing in."
+      );
       router.push("/login");
     },
   });

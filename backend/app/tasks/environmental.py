@@ -1,29 +1,36 @@
 """Celery tasks for periodic environmental data collection.
 
-The heavy lifting lives in :class:`~app.services.environmental_service.EnvironmentalService`;
-these tasks are thin wrappers so the fetch/persist logic stays reusable and
-unit-testable without Celery.
+Execution-model note
+--------------------
+The environmental service is **async** (httpx.AsyncClient under the hood),
+while Celery workers are synchronous. Mixing the two incorrectly — e.g.
+calling an async method and treating the returned coroutine as a result, or
+spinning a fresh event loop per API request — is a classic bug. The correct
+boundary used here is:
+
+    sync Celery task
+        -> ONE asyncio.run(...) per task
+            -> async orchestration function
+                -> async EnvironmentalService (provider adapters)
+
+Each task returns a small JSON-serialisable summary dict so results are easy
+to inspect from Flower or the result backend.
 
 Tasks
 -----
 ``app.tasks.environmental.collect_all_locations``
-    Fan-out entry point used by the Beat schedule. Iterates every monitored
-    location, collecting weather and air-quality readings for each.
+    Fan-out entry point used by the Beat schedule.
 ``app.tasks.environmental.collect_location``
-    Collects readings for a *single* location -- useful for on-demand or
-    fan-out-per-location scheduling.
+    Collects readings for a *single* location.
 ``app.tasks.environmental.ping``
     Trivial health-check task used to verify worker connectivity.
-
-Each task returns a small JSON-serialisable summary dict so results are easy
-to inspect from Flower or the result backend.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
-from app.core.logging import request_id_context  # noqa: F401  (re-exported for parity)
 from app.tasks.celery_app import celery_app
 
 # Default set of locations used by the scheduled collection task. In a real
@@ -44,53 +51,70 @@ def _session():
     return SessionLocal()
 
 
-def collect_for_location(lat: float, lon: float, location_name: str) -> Dict[str, Any]:
-    """Fetch weather + air quality for one location and store successful readings.
+async def collect_for_location_async(
+    lat: float,
+    lon: float,
+    location_name: str,
+) -> Dict[str, Any]:
+    """Async orchestration for one location: fetch both sources, persist.
 
-    Plain (non-task) function so it can be invoked directly in tests and
-    one-off scripts, as well as through the Celery tasks below.
+    The DB session stays synchronous (the project uses standard SQLAlchemy);
+    only the HTTP fetches are awaited, concurrently via asyncio.gather so a
+    slow weather response never delays the air-quality request.
     """
     from app.services.environmental_service import EnvironmentalService
 
     db = _session()
     try:
         service = EnvironmentalService(db)
+
+        async def _safe(coro, label):
+            try:
+                return await coro
+            except Exception as exc:  # provider errors must not kill the batch
+                return {"error": f"{label} fetch failed: {exc}"}
+
+        weather, air = await asyncio.gather(
+            _safe(
+                service.fetch_weather(lat, lon, location_name), "weather"
+            ),
+            _safe(
+                service.fetch_air_quality(lat, lon, location_name), "air quality"
+            ),
+        )
+
         summary: Dict[str, Any] = {
             "location": location_name,
-            "weather": False,
-            "air_quality": False,
+            "weather": "error" not in weather,
+            "air_quality": "error" not in air,
         }
-
-        try:
-            weather = service.fetch_weather(lat, lon, location_name)
-        except Exception as exc:  # provider errors must not kill the batch
-            weather = {"error": f"weather fetch failed: {exc}"}
-        if "error" not in weather:
+        if summary["weather"]:
             service.save_reading(weather)
-            summary["weather"] = True
         else:
             summary["weather_error"] = weather["error"]
-
-        try:
-            air = service.fetch_air_quality(lat, lon, location_name)
-        except Exception as exc:
-            air = {"error": f"air quality fetch failed: {exc}"}
-        if "error" not in air:
+        if summary["air_quality"]:
             service.save_reading(air)
-            summary["air_quality"] = True
         else:
             summary["air_quality_error"] = air["error"]
-
         return summary
     finally:
         db.close()
+
+
+def collect_for_location(lat: float, lon: float, location_name: str) -> Dict[str, Any]:
+    """Synchronous entry point wrapping the async orchestration.
+
+    Creates exactly ONE event loop per call (i.e. one per Celery task
+    execution) — never one per individual API request.
+    """
+    return asyncio.run(collect_for_location_async(lat, lon, location_name))
 
 
 @celery_app.task(name="app.tasks.environmental.collect_location", bind=True)
 def collect_location(
     self, lat: float, lon: float, location_name: str
 ) -> Dict[str, Any]:
-    """Collect readings for a single location (retry on transient failure)."""
+    """Collect readings for a single location."""
     return collect_for_location(lat, lon, location_name)
 
 
@@ -98,11 +122,7 @@ def collect_location(
 def collect_all_locations(
     locations: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Collect readings for every monitored location.
-
-    Scheduled every 15 minutes by Celery Beat. Returns an aggregate summary so
-    a single Flower row shows how many locations succeeded and why any failed.
-    """
+    """Collect readings for every monitored location (Beat: every 15 min)."""
     targets = locations or DEFAULT_LOCATIONS
     results = [
         collect_for_location(loc["lat"], loc["lon"], loc["name"]) for loc in targets
