@@ -27,6 +27,24 @@ def _resolve_token(
     return None
 
 
+def _resolve_user(token: str, db: Session) -> Optional[User]:
+    """Decode a JWT and resolve its ``sub`` (immutable user ID) to a User."""
+    try:
+        payload = decode_access_token(token)
+    except HTTPException:
+        return None
+
+    sub: str = payload.get("sub") or ""
+    # `sub` is the immutable numeric user ID (never the email, which can
+    # change / be reused across SSO providers).
+    try:
+        user_id = int(sub)
+    except (TypeError, ValueError):
+        return None
+
+    return UserRepository(db).get_by_id(user_id)
+
+
 def get_current_user(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
@@ -40,26 +58,13 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = decode_access_token(token)
-    email: str = payload.get("sub")
-
-    if not email:
+    user = _resolve_user(token, db)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    repo = UserRepository(db)
-    user = repo.get_by_email(email)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
     return user
 
 
@@ -71,16 +76,4 @@ def get_optional_user(
     token = _resolve_token(credentials, request)
     if not token:
         return None
-
-    try:
-        payload = decode_access_token(token)
-    except HTTPException:
-        return None
-
-    email: str = payload.get("sub")
-
-    if not email:
-        return None
-
-    repo = UserRepository(db)
-    return repo.get_by_email(email)
+    return _resolve_user(token, db)

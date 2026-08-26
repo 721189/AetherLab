@@ -7,7 +7,23 @@ export interface LoginPayload {
 }
 
 export async function login(payload: LoginPayload): Promise<Token> {
+  // Non-browser clients use this endpoint (tokens in the JSON body).
   return apiFetch<Token>("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, false);
+}
+
+export interface BrowserLoginResponse {
+  message: string;
+}
+
+export async function loginBrowser(
+  payload: LoginPayload
+): Promise<BrowserLoginResponse> {
+  // Browser sessions authenticate via HttpOnly cookies ONLY — the response
+  // contains no tokens for JavaScript to read or persist.
+  return apiFetch<BrowserLoginResponse>("/api/v1/auth/login/browser", {
     method: "POST",
     body: JSON.stringify(payload),
   }, false);

@@ -6,7 +6,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 # Recognised data source identifiers for ingested readings.
-ENVIRONMENTAL_SOURCES = ("openweather", "openaq", "nasa", "manual")
+# Kept in lockstep with the canonical schema's SourceName literal
+# (app.schemas.environmental).
+ENVIRONMENTAL_SOURCES = ("openweather", "openaq", "nasa", "copernicus", "manual")
 
 
 class EnvironmentalReading(Base):

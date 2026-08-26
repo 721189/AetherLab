@@ -13,7 +13,7 @@
 
 AetherLab is an **intelligent environmental intelligence platform** that combines **geospatial data, live weather, air quality, satellite imagery, and autonomous AI agents** into one secure, production-grade product. Users monitor the world around them, manage projects and agents, and converse with AI assistants backed by interchangeable LLM providers — all served by a **FastAPI** backend and a **Next.js** frontend.
 
-> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, Prometheus metrics, a 218-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
+> This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, Prometheus metrics, a 261-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
 
 ---
 
@@ -84,7 +84,7 @@ The system uses a **defense-in-depth, layered backend** with a separate frontend
 | Task queue | [Celery](https://docs.celeryq.dev/) | Optional scheduled environmental ingestion |
 | AI SDK | [OpenAI SDK](https://github.com/openai/openai-python) | Behind a provider abstraction |
 | Server | [uvicorn](https://www.uvicorn.org/) | ASGI server |
-| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 218-test suite |
+| Testing | [pytest](https://docs.pytest.org/) + FastAPI `TestClient` | 261-test suite |
 
 ### Frontend
 
@@ -294,7 +294,8 @@ The Next.js middleware validates `/dashboard/*` by forwarding cookies to the bac
 | `POST` | `/api/v1/auth/register` | ❌ | Create account → verification email sent (no token in response) |
 | `GET` | `/api/v1/auth/verify/{token}` | ❌ | Confirm email from the emailed link, unlock login |
 | `POST` | `/api/v1/auth/resend-verification` | ❌ | Re-send the verification email |
-| `POST` | `/api/v1/auth/login` | ❌ | Issue token pair + set HttpOnly cookies |
+| `POST` | `/api/v1/auth/login` | ❌ | Issue token pair + set HttpOnly cookies (API clients) |
+| `POST` | `/api/v1/auth/login/browser` | ❌ | Browser login: HttpOnly cookies ONLY — no tokens in the response |
 | `POST` | `/api/v1/auth/refresh` | ✅ | Rotate the refresh token (body or cookie) |
 | `POST` | `/api/v1/auth/logout` | ❌ | Clear auth cookies + revoke session server-side |
 | `GET` | `/api/v1/auth/me` | ✅ | Current user profile |
@@ -350,6 +351,16 @@ All routes are versioned under `/api/v1`. `docs/` serves an interactive OpenAPI/
 | `GET` | `/api/v1/environmental/readings/{id}` | ❌ | Full reading by ID |
 | `GET` | `/api/v1/environmental/?lat=&lon=&radius_km=` | ❌ | Simplified geofence query |
 
+### Satellite
+
+Provider-independent surface over the `SatelliteProvider` abstraction (nasa, copernicus, ...):
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/satellite/scenes?lat=&lon=&source=` | ✅ | Catalogue search with provenance |
+| `GET` | `/api/v1/satellite/scenes/{scene_id}?source=` | ✅ | Full scene metadata |
+| `POST` | `/api/v1/satellite/observations` | ✅ | Retrieve + persist observations via the canonical path |
+
 ---
 
 ## 🚦 Rate Limiting
@@ -367,7 +378,7 @@ Limits are enforced with **slowapi** (shared in-memory limiter, keyed by client 
 
 Responses include the structured `429` body `{ "detail": "Rate limit exceeded", "code": "rate_limit_exceeded" }`.
 
-> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 218-test suite never trips a per-IP cap.
+> Tests run with the limiter **disabled** (conftest autouse fixture) so the full 261-test suite never trips a per-IP cap.
 >
 ### Scientific-integrity guarantees
 
@@ -484,7 +495,7 @@ environmental_readings   (independent weather + air-quality snapshots)
 
 ## 🧪 Testing
 
-A **218-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
+A **261-test suite** (`pytest`) covers the full vertical slice — register → verify → login → project → agent → conversation → AI reply — plus exhaustive negative cases (wrong password, unverified accounts, cross-user access, invalid/duplicate payloads, expired & replayed tokens).
 
 ```bash
 cd backend

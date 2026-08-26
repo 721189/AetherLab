@@ -3,10 +3,12 @@ import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.router import router
+from app.core.cookies import is_cross_site_mutation
 from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
 from app.core.config import settings
 from app.core.logging import setup_logging, request_id_context
@@ -45,6 +47,25 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 app.include_router(router)
+
+
+@app.middleware("http")
+async def csrf_origin_middleware(request: Request, call_next):
+    """Reject cross-site, cookie-authenticated state changes (CSRF guard).
+
+    Complements SameSite=Lax cookies with explicit Origin validation — see
+    :func:`app.core.cookies.is_cross_site_mutation`.
+    """
+    if is_cross_site_mutation(request):
+        logger.warning(
+            "Blocked cross-site mutation from origin %s (%s %s)",
+            request.headers.get("origin"), request.method, request.url.path,
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Cross-site request rejected", "code": "csrf_rejected"},
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")

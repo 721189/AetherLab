@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, Request, Response
 
+import logging
+
 from app.core.cookies import clear_auth_cookies, set_auth_cookies
 from app.core.rate_limiter import limiter
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db
+from app.exceptions import AuthenticationError
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
 from app.schemas.user import (
@@ -45,6 +48,32 @@ def register(
     service = AuthService(UserRepository(db))
     db_user = service.register(user)
     return UserRegisterResponse(user=UserResponse.model_validate(db_user))
+
+
+@router.post(
+    "/login/browser",
+    response_model=None,
+    summary="Authenticate a browser session (cookies only)",
+    description=(
+        "Browser-specific variant of /auth/login: sets the HttpOnly auth "
+        "cookies and returns NO token body, so JavaScript can never obtain "
+        "the credential even from the response. Non-browser API consumers "
+        "should use POST /auth/login instead."
+    ),
+    response_description="HttpOnly cookies set; no tokens in the response",
+)
+@limiter.limit("5/minute")
+def login_browser(
+    request: Request,
+    response: Response,
+    user: UserLogin,
+    db=Depends(get_db),
+):
+    service = AuthService(UserRepository(db))
+    tokens = service.login(user.email, user.password)
+    set_auth_cookies(response, tokens["access_token"], tokens["refresh_token"])
+    # Deliberately NO tokens in the body — the cookie IS the credential.
+    return {"message": "Authenticated"}
 
 
 @router.post(
@@ -127,8 +156,13 @@ def logout(
     if refresh_token:
         try:
             AuthService(UserRepository(db)).revoke_session(refresh_token)
+        except AuthenticationError as exc:
+            # Expected for already-invalid sessions; cookies still cleared.
+            logger.info("Logout presented an invalid session: %s", exc)
         except Exception:
-            pass  # logout must always succeed client-side
+            # NEVER hide infrastructure/programming failures in security
+            # code paths — surface them loudly.
+            logger.exception("Unexpected failure revoking session during logout")
     clear_auth_cookies(response)
     return {"message": "Logged out"}
 

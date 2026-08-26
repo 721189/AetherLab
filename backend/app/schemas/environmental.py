@@ -102,6 +102,14 @@ class EnvironmentalObservation(BaseModel):
             "window per pollutant; 'unknown' marks instantaneous readings."
         ),
     )
+    provenance: dict = Field(
+        default_factory=dict,
+        description=(
+            "Immutable provider-provenance bundle for reproducibility: "
+            "provider, collection, scene_id, processing algorithm/version, "
+            "software version, CRS, geometry/AOI, cloud percentage, bands..."
+        ),
+    )
     quality_flags: dict = Field(
         default_factory=dict,
         description="Provider-specific quality flags (cloud cover, QA values...)",

@@ -90,7 +90,9 @@ class AuthService:
             raise AuthenticationError(detail="Invalid credentials")
 
         # Issue an access token and a fresh refresh token family.
-        access_token = create_access_token({"sub": user.email})
+        # Identity claim is the immutable user ID (NOT the email): emails can
+        # change and SSO providers may key differently, but `sub` must be stable.
+        access_token = create_access_token({"sub": str(user.id)})
         refresh_token, family_id, expires_at = create_refresh_token(user.id)
         self.refresh_repo.create(
             user_id=user.id,
@@ -162,7 +164,7 @@ class AuthService:
             self.refresh_repo.commit()
             raise AuthenticationError(detail="Invalid refresh token")
 
-        new_access = create_access_token({"sub": user.email})
+        new_access = create_access_token({"sub": str(user.id)})
         new_refresh, family, expires_at = create_refresh_token(user.id, row.family_id)
 
         # Rotate: persist the replacement, revoke the presented one, commit atomically.

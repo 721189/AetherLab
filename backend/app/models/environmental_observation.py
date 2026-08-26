@@ -56,6 +56,9 @@ class EnvironmentalObservationRecord(Base):
     quality_flags: Mapped[str | None] = mapped_column(
         String(1024), nullable=True  # JSON-encoded dict
     )
+    # Immutable provenance bundle (JSON): collection, scene_id, processing
+    # algorithm/version, software version, CRS, AOI, cloud %, bands...
+    provenance: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

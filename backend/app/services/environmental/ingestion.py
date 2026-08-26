@@ -49,6 +49,7 @@ class EnvironmentalObservationRepository:
             resolution=obs.resolution,
             quality=obs.quality,
             quality_flags=json.dumps(obs.quality_flags) if obs.quality_flags else None,
+            provenance=json.dumps(obs.provenance) if obs.provenance else None,
         )
         self.db.add(record)
         self.db.commit()

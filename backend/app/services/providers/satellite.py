@@ -194,6 +194,16 @@ class NASAProvider:
                     observed_at=scene.acquisition_time,
                     retrieved_at=now,
                     quality_flags={"fill_value_masked": True},
+                    provenance={
+                        "provider": "nasa",
+                        "collection": "POWER",
+                        "scene_id": scene.scene_id,
+                        "product": scene.product,
+                        "processing": scene.processing_level,
+                        "reanalysis_source": "MERRA-2",
+                        "request_url": self.base_url,
+                        "retrieved_at": now.isoformat(),
+                    },
                     quality="verified",
                 )
             )

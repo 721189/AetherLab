@@ -60,3 +60,44 @@ def clear_auth_cookies(response: Response) -> None:
         REFRESH_TOKEN_COOKIE, "", max_age=0, httponly=True,
         secure=secure, samesite="lax", path="/api/v1/auth",
     )
+
+
+# ---------------------------------------------------------------------------
+# CSRF defence-in-depth (origin checking)
+# ---------------------------------------------------------------------------
+
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _allowed_origins() -> set[str]:
+    origins = {o.rstrip("/") for o in settings.CORS_ORIGINS}
+    origins.add(settings.FRONTEND_BASE_URL.rstrip("/"))
+    return origins
+
+
+def is_cross_site_mutation(request: Request) -> bool:
+    """True when a state-changing request uses cookie auth from a foreign origin.
+
+    Browsers ALWAYS attach an Origin header to cross-site POSTs, so:
+      * no Origin header      -> non-browser client (curl/service) -> allow
+      * Origin in allow-list  -> first-party browser request       -> allow
+      * foreign Origin        -> CSRF attempt                      -> block
+
+    This complements SameSite=Lax (which already stops cross-site cookie
+    attachment in modern browsers); the check catches legacy/embedded
+    browsers and misconfigured subdomains.
+    """
+    if request.method.upper() not in UNSAFE_METHODS:
+        return False
+    # Header-based API clients are immune to CSRF by construction.
+    if request.headers.get("authorization"):
+        return False
+    # Only cookie-authenticated mutations need the check.
+    if not request.cookies.get(ACCESS_TOKEN_COOKIE):
+        return False
+
+    origin = request.headers.get("origin")
+    if not origin:
+        return False  # non-browser clients don't send Origin
+    return origin.rstrip("/") not in _allowed_origins()
+

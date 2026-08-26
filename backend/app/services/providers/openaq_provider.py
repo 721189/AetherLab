@@ -118,6 +118,14 @@ class OpenAQProvider(EnvironmentalProvider):
                     location_name=location_name,
                     observed_at=observed,
                     retrieved_at=now,
+                    provenance={
+                        "provider": "openaq",
+                        "collection": "sentinel-free-air-quality",
+                        "site_id": site_id,
+                        "sensor_id": sensor_id,
+                        "api_version": "v3",
+                        "retrieved_at": now.isoformat(),
+                    },
                     quality="verified",
                 )
             )

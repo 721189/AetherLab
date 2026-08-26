@@ -25,10 +25,11 @@ export function useLogin() {
   const setAuth = useAuth((s) => s.setAuth);
 
   return useMutation({
-    mutationFn: authApi.login,
-    onSuccess: async (token) => {
+    // Browser login: HttpOnly cookies only — the response carries no tokens.
+    mutationFn: authApi.loginBrowser,
+    onSuccess: async (_resp, variables) => {
       const user = await authApi.me();
-      setAuth(token, user);
+      setAuth({ access_token: "", refresh_token: "", token_type: "cookie" }, user);
       qc.setQueryData(authKeys.me, user);
       router.push("/dashboard");
     },

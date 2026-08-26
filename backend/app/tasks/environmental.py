@@ -175,13 +175,15 @@ def collect_satellite(
 def discover_locations() -> List[Dict[str, Any]]:
     """Read enabled monitored locations from the database.
 
-    Falls back to :data:`DEFAULT_LOCATIONS` when the table is empty OR the
-    database is unreachable — a Beat tick must never crash because of a
-    transient DB blip; the platform defaults are always safe to collect.
+    Falls back to :data:`DEFAULT_LOCATIONS` only in non-production when the
+    table is empty OR the database is unreachable. In production a DB failure
+    FAILS LOUDLY: silently ingesting arbitrary default cities would mask an
+    infrastructure outage as "successful" collection.
     """
     import logging
 
     logger = logging.getLogger(__name__)
+    from app.core.config import settings
     from app.repositories.monitored_location_repository import (
         MonitoredLocationRepository,
     )
@@ -201,6 +203,12 @@ def discover_locations() -> List[Dict[str, Any]]:
             for r in rows
         ]
     except Exception as exc:
+        if settings.APP_ENV == "production":
+            # Fail loud: an outage must look like an outage.
+            raise RuntimeError(
+                "Could not read monitored_locations and APP_ENV=production; "
+                f"refusing to silently fall back to default cities. {exc}"
+            ) from exc
         logger.warning("Could not read monitored locations (%s); using defaults", exc)
         return list(DEFAULT_LOCATIONS)
     finally:
