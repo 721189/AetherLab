@@ -129,20 +129,50 @@ class ConversationService:
         return model, system_prompt, temperature, max_tokens
 
     def _grounded_system_prompt(self, content: str, system_prompt: str) -> str:
-        """Augment the system prompt with an evidence bundle when available.
+        """Route the message through the right AI mode (Step 9).
 
-        Failure-safe: any evidence-layer problem degrades to the plain prompt
-        rather than breaking chat.
+        GENERAL_CHAT           -> the plain agent/system prompt, untouched.
+        ENVIRONMENTAL_ANALYSIS -> evidence-grounded prompt. When evidence is
+        unavailable (no data at all, or the user named an unmonitored
+        location) the model is explicitly instructed to say so rather than
+        hallucinate values.
         """
         try:
             from app.services.intelligence import (
+                ENVIRONMENTAL_ANALYSIS,
                 EvidenceBuilder,
+                classify_mode,
                 format_evidence_context,
             )
 
+            if classify_mode(content) != ENVIRONMENTAL_ANALYSIS:
+                return system_prompt  # generic chat: no evidence machinery
+
             evidence = EvidenceBuilder(self.db).build(content)
+
+            # Unmonitored location: say so, offer supported regions.
+            if evidence.location_status == "NOT_FOUND":
+                return (
+                    f"{system_prompt}\n\n"
+                    "=== ENVIRONMENTAL ANALYSIS MODE ===\n"
+                    f"{evidence.notes[0]} Do NOT invent or estimate values for "
+                    f"it. Tell the user you have no monitored data for "
+                    f"'{evidence.requested_location}' and list the supported "
+                    "regions asked about in the data caveats below.\n"
+                    f"{format_evidence_context(evidence)}"
+                )
+
+            # Environmental question but no usable evidence: refuse to guess.
             if not evidence.derived_metrics and not evidence.observations:
-                return system_prompt  # nothing relevant stored; plain chat
+                return (
+                    f"{system_prompt}\n\n"
+                    "=== ENVIRONMENTAL ANALYSIS MODE ===\n"
+                    "Insufficient environmental evidence is available in the "
+                    "AetherLab database to answer this question. State that "
+                    "clearly and do NOT fabricate measurements, values or "
+                    "sources."
+                )
+
             return (
                 f"{system_prompt}\n\n"
                 "=== GROUNDING EVIDENCE (AetherLab environmental database) ===\n"

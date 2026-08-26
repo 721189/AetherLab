@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.environmental_reading import EnvironmentalReading
+from app.models.environmental_observation import EnvironmentalObservationRecord
 
 # question keyword -> canonical variable(s)
 _VARIABLE_KEYWORDS = {
@@ -41,6 +41,9 @@ _VARIABLE_KEYWORDS = {
     "so2": ["so2", "sulphur dioxide", "sulfur dioxide"],
 }
 
+# Generic words allowed immediately after "in" that are not locations.
+_NON_LOCATIONS = {"the", "general", "recent", "your", "this", "terms", "real", "india"}
+
 
 @dataclass
 class QueryPlan:
@@ -49,6 +52,10 @@ class QueryPlan:
     location_name: Optional[str] = None
     variables: List[str] = field(default_factory=list)
     window_hours: int = 72
+    # "FOUND" | "NOT_FOUND" | "OPEN" (no location mentioned)
+    location_status: str = "OPEN"
+    # The location token the user named, even when we have no data for it.
+    requested_location: Optional[str] = None
 
 
 def plan_query(question: str, known_locations: List[str]) -> QueryPlan:
@@ -56,14 +63,43 @@ def plan_query(question: str, known_locations: List[str]) -> QueryPlan:
 
     Deliberately rule-based (fast, auditable, zero-cost): the LLM only ever
     sees structured evidence and never guesses which data to fetch.
+
+    ``location_status`` distinguishes three cases so downstream code never
+    conflates "no location mentioned" (OPEN) with "user named a region we
+    don't monitor" (NOT_FOUND) — the latter must NOT silently query every
+    location.
     """
     q = question.lower()
     plan = QueryPlan()
 
+    found = None
     for location in known_locations:
         if location.lower() in q:
-            plan.location_name = location
+            found = location
             break
+
+    if found is not None:
+        plan.location_name = found
+        plan.location_status = "FOUND"
+    else:
+        # Heuristic: the user named a specific place we don't monitor
+        # ("NO2 in London?"). Detect a capitalized proper noun after "in" and
+        # mark it NOT_FOUND rather than widening the query to every location.
+        import re
+
+        m = re.search(r"in\s+([A-Z][A-Za-z][\w\s]*)", question)
+        if m:
+            candidate = m.group(1).strip().strip("?.").strip()
+            # Only treat it as a requested-but-unmonitored location when it
+            # is not a known filler word.
+            first = candidate.split()[0].lower()
+            if candidate and first not in _NON_LOCATIONS:
+                plan.requested_location = candidate
+                plan.location_status = "NOT_FOUND"
+            else:
+                plan.location_status = "OPEN"
+        else:
+            plan.location_status = "OPEN"
 
     for variable, keywords in _VARIABLE_KEYWORDS.items():
         if any(k in q for k in keywords):
@@ -129,6 +165,8 @@ class EvidenceSet:
     window_end: Optional[datetime]
     data_completeness: float   # 0..1 fraction of requested variables found
     overall_confidence: float  # 0..1
+    location_status: str = "OPEN"  # FOUND | NOT_FOUND | OPEN
+    requested_location: Optional[str] = None
     notes: List[str] = field(default_factory=list)
 
 
@@ -142,77 +180,124 @@ def _unit_for(name: str) -> str:
 
 
 class EvidenceBuilder:
-    """Retrieves and aggregates stored environmental data into an EvidenceSet."""
+    """Retrieves and aggregates stored environmental data into an EvidenceSet.
+
+    Reads ONLY the canonical ``environmental_observations`` table — never the
+    legacy flattened snapshot — so every evidence item carries the full
+    provenance chain: source, dataset, product, processing level, acquisition
+    time, averaging period, quality and uncertainty (Step 6).
+    """
+
+    POLLUTANTS = ("pm25", "pm10", "no2", "o3", "so2", "co")
 
     def __init__(self, db: Session):
         self.db = db
 
     def _known_locations(self) -> List[str]:
         rows = (
-            self.db.query(EnvironmentalReading.location_name)
+            self.db.query(EnvironmentalObservationRecord.location_name)
             .distinct()
             .limit(200)
             .all()
         )
-        return [r[0] for r in rows]
+        return [r[0] for r in rows if r[0]]
 
     def build(self, question: str) -> EvidenceSet:
         plan = plan_query(question, self._known_locations())
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=plan.window_hours)
 
+        # ---- Step 8: unmonitored location must NOT widen to all locations ---
+        if plan.location_status == "NOT_FOUND":
+            name = plan.requested_location or "that location"
+            supported = sorted({loc for loc in self._known_locations() if loc})
+            return EvidenceSet(
+                question=question,
+                plan=plan,
+                observations=[],
+                derived_metrics=[],
+                source_references=[],
+                window_start=None,
+                window_end=None,
+                data_completeness=0.0,
+                overall_confidence=0.0,
+                location_status="NOT_FOUND",
+                requested_location=plan.requested_location,
+                notes=[
+                    f"No monitored data available for {name}.",
+                    (
+                        "Supported regions: " + ", ".join(supported[:20])
+                        if supported
+                        else "No locations are monitored yet."
+                    ),
+                ],
+            )
+
         query = (
-            self.db.query(EnvironmentalReading)
-            .filter(EnvironmentalReading.recorded_at >= cutoff.replace(tzinfo=None))
+            self.db.query(EnvironmentalObservationRecord)
+            .filter(EnvironmentalObservationRecord.observed_at >= cutoff)
         )
         if plan.location_name:
             query = query.filter(
-                EnvironmentalReading.location_name == plan.location_name
+                EnvironmentalObservationRecord.location_name == plan.location_name
             )
-        readings = (
-            query.order_by(EnvironmentalReading.recorded_at.desc()).limit(500).all()
+        records = (
+            query.order_by(EnvironmentalObservationRecord.observed_at.desc())
+            .limit(500)
+            .all()
         )
 
         series: Dict[str, List[float]] = {}
+        units: Dict[str, str] = {}
         references: List[SourceReference] = []
         observation_payloads: List[Dict[str, Any]] = []
         wanted = set(plan.variables or [])
-        fields_of_interest = {
-            "temperature", "feels_like", "humidity", "pressure",
-            "wind_speed", "pm25", "pm10", "no2", "o3", "co", "so2",
-        }
-        for reading in readings:
-            for name in fields_of_interest:
-                value = getattr(reading, name, None)
-                if value is None:
-                    continue
-                if wanted and name not in wanted and not (
-                    {"aqi"} & wanted and name in ("pm25", "pm10", "no2")
-                ):
-                    continue
-                series.setdefault(name, []).append(float(value))
+
+        for rec in records:
+            if rec.value is None:
+                continue
+            variable = rec.variable
+            series.setdefault(variable, []).append(float(rec.value))
+            units.setdefault(variable, rec.unit)
+
+            # Full provenance payload per observation (Steps 6+7): the LLM can
+            # trace every number back to its source scene.
+            observation_payloads.append(
+                {
+                    "variable": variable,
+                    "value": rec.value,
+                    "unit": rec.unit,
+                    "source": rec.source,
+                    "dataset": rec.dataset,
+                    "product": rec.product,
+                    "processing_level": rec.processing_level,
+                    "location": rec.location_name,
+                    "observed_at": (
+                        rec.observed_at.isoformat() if rec.observed_at else None
+                    ),
+                    "acquisition_time": (
+                        rec.acquisition_time.isoformat()
+                        if rec.acquisition_time
+                        else None
+                    ),
+                    "averaging_period": rec.averaging_period,
+                    "quality": rec.quality,
+                    "uncertainty": rec.uncertainty,
+                    "provenance": rec.provenance or {},
+                }
+            )
 
             references.append(
                 SourceReference(
-                    source=reading.source,
-                    dataset=None,
-                    variable=",".join(sorted(series)) or "snapshot",
-                    observed_at=reading.recorded_at.isoformat(),
-                    averaging_period="unknown",
-                    provenance={"reading_id": reading.id},
+                    source=rec.source,
+                    dataset=rec.dataset or rec.product,
+                    variable=variable,
+                    observed_at=(
+                        rec.observed_at.isoformat() if rec.observed_at else None
+                    ),
+                    averaging_period=rec.averaging_period,
+                    provenance=rec.provenance or {},
                 )
-            )
-            observation_payloads.append(
-                {
-                    "location": reading.location_name,
-                    "source": reading.source,
-                    "recorded_at": reading.recorded_at.isoformat(),
-                    "temperature": reading.temperature,
-                    "humidity": reading.humidity,
-                    "aqi": reading.aqi,
-                    "pm25": reading.pm25,
-                    "pm10": reading.pm10,
-                }
             )
 
         # ---- derived metrics ------------------------------------------------
@@ -229,7 +314,7 @@ class EvidenceBuilder:
                 DerivedMetric(
                     name=f"{name}_mean",
                     value=round(mean, 2),
-                    unit=_unit_for(name),
+                    unit=units.get(name, _unit_for(name)),
                     method="arithmetic_mean",
                     uncertainty=round(spread, 2),
                     confidence=confidence,
@@ -237,29 +322,32 @@ class EvidenceBuilder:
                 )
             )
 
-        # AQI nowcast from the most recent pollutant snapshot (labelled honestly).
-        latest_with_aqi = next((r for r in readings if r.aqi is not None), None)
-        if latest_with_aqi and (not wanted or "aqi" in wanted):
-            pollutants = {
-                v: getattr(latest_with_aqi, v)
-                for v in ("pm25", "pm10", "no2", "o3", "so2", "co")
-                if getattr(latest_with_aqi, v) is not None
-            }
-            if pollutants:
-                from app.core.aqi import calculate_overall_aqi
+        # AQI nowcast from the most recent pollutant observations (labelled
+        # honestly when inputs are instantaneous / non-standard EPA window).
+        latest_pollutants: Dict[str, float] = {}
+        pollutant_windows: Dict[str, str] = {}
+        for rec in records:
+            if rec.variable in self.POLLUTANTS and rec.value is not None:
+                if rec.variable not in latest_pollutants:
+                    latest_pollutants[rec.variable] = float(rec.value)
+                    pollutant_windows[rec.variable] = rec.averaging_period
+        if latest_pollutants and (not wanted or "aqi" in wanted):
+            from app.core.aqi import calculate_overall_aqi
 
-                record = calculate_overall_aqi(pollutants)
-                metrics.append(
-                    DerivedMetric(
-                        name="aqi_nowcast",
-                        value=record["aqi"],
-                        unit="index",
-                        method="EPA breakpoint max-sub-index",
-                        confidence=0.7,  # instantaneous inputs, non-standard window
-                        n_observations=len(pollutants),
-                        methodology_status=record["methodology_status"],
-                    )
+            record = calculate_overall_aqi(
+                latest_pollutants, averaging_periods=pollutant_windows
+            )
+            metrics.append(
+                DerivedMetric(
+                    name="aqi_nowcast",
+                    value=record["aqi"],
+                    unit="index",
+                    method="EPA breakpoint max-sub-index",
+                    confidence=0.7,  # instantaneous inputs, non-standard window
+                    n_observations=len(latest_pollutants),
+                    methodology_status=record["methodology_status"],
                 )
+            )
 
         # ---- completeness / overall confidence ------------------------------
         expected = wanted or set(series.keys())
@@ -273,7 +361,7 @@ class EvidenceBuilder:
         ) * (completeness if wanted else 1.0)
 
         notes: List[str] = []
-        if not readings:
+        if not records:
             notes.append("No stored observations matched this question.")
         if plan.variables and completeness < 1.0:
             missing = sorted(expected - set(series.keys()))
@@ -289,33 +377,107 @@ class EvidenceBuilder:
             window_end=now,
             data_completeness=round(completeness, 2),
             overall_confidence=round(overall_confidence, 2),
+            location_status=plan.location_status,
+            requested_location=plan.requested_location,
             notes=notes,
         )
 
 
+# ---------------------------------------------------------------------------
+# Step 9: two explicit AI modes.
+#
+#   GENERAL_CHAT            -> plain LLM chat (no evidence machinery)
+#   ENVIRONMENTAL_ANALYSIS  -> EvidenceBuilder -> EvidenceSet -> grounded LLM
+#
+# An environmental question with NO usable evidence must never fall through
+# to generic chat (that is exactly how hallucinated numbers happen) — it
+# gets an explicit "insufficient environmental evidence" instruction instead.
+# ---------------------------------------------------------------------------
+
+GENERAL_CHAT = "GENERAL_CHAT"
+ENVIRONMENTAL_ANALYSIS = "ENVIRONMENTAL_ANALYSIS"
+
+
+def classify_mode(question: str) -> str:
+    """Deterministically decide whether a message needs the evidence layer.
+
+    A question is environmental when it mentions a monitored variable, AQI,
+    or air/weather quality. Everything else is ordinary chat.
+    """
+    q = question.lower()
+    for keywords in _VARIABLE_KEYWORDS.values():
+        if any(k in q for k in keywords):
+            return ENVIRONMENTAL_ANALYSIS
+    if any(
+        phrase in q
+        for phrase in (
+            "air quality", "pollution", "weather", "environment",
+            "satellite", "emission", "monitor", "observation",
+        )
+    ):
+        return ENVIRONMENTAL_ANALYSIS
+    return GENERAL_CHAT
+
+
 def format_evidence_context(evidence: EvidenceSet) -> str:
-    """Render the EvidenceSet as a grounded system-prompt appendix."""
+    """Render the EvidenceSet as a grounded system-prompt appendix.
+
+    Every observation is rendered with its full measurement + provenance chain
+    (value, unit, source dataset/product, acquisition time, quality,
+    processing level) so the model can trace each conclusion back to data.
+    """
     lines = [
         "You are answering using ONLY the verified evidence below.",
         "Cite sources as [source:variable @ timestamp].",
         "If the evidence does not cover something, say so explicitly.",
         "",
         f"Evidence window: {evidence.window_start:%Y-%m-%d %H:%M} UTC .. "
-        f"{evidence.window_end:%Y-%m-%d %H:%M} UTC",
+        f"{evidence.window_end:%Y-%m-%d %H:%M} UTC"
+        if evidence.window_start
+        else "Evidence window: none (no data)",
         "Location filter: "
         + (evidence.plan.location_name or "all monitored locations"),
         f"Data completeness: {evidence.data_completeness:.0%}; "
         f"overall confidence: {evidence.overall_confidence:.2f}",
     ]
+
+    # ---- Actual observations with full provenance (Step 7) -----------------
+    if evidence.observations:
+        lines += ["", "Observations (trace every claim to these):"]
+        for obs in evidence.observations[:15]:
+            acquired = obs.get("acquisition_time") or obs.get("observed_at")
+            parts = [
+                f"{obs['variable']} = {obs['value']} {obs['unit']}",
+                f"source: {obs['source']}",
+            ]
+            if obs.get("dataset"):
+                parts.append(f"dataset: {obs['dataset']}")
+            if obs.get("product"):
+                parts.append(f"product: {obs['product']}")
+            if obs.get("processing_level"):
+                parts.append(f"processing: {obs['processing_level']}")
+            if acquired:
+                parts.append(f"acquired: {acquired}")
+            parts.append(f"quality: {obs.get('quality', 'unknown')}")
+            if obs.get("uncertainty") is not None:
+                parts.append(f"uncertainty: +/-{obs['uncertainty']} {obs['unit']}")
+            if obs.get("averaging_period"):
+                parts.append(f"window: {obs['averaging_period']}")
+            lines.append("- " + "; ".join(parts))
+
     if evidence.derived_metrics:
         lines += ["", "Derived metrics:"]
         for metric in evidence.derived_metrics:
             d = metric.to_dict()
             unc = f" +/- {d['uncertainty']}" if d["uncertainty"] is not None else ""
+            inputs = ", ".join(
+                o["variable"] for o in evidence.observations[:5]
+            ) or "stored observations"
             lines.append(
                 f"- {d['name']} = {d['value']} {d['unit']}{unc} "
-                f"(n={d['n_observations']}, confidence={d['confidence']}, "
-                f"status={d['methodology_status']})"
+                f"(method={d['method']}; n={d['n_observations']}, "
+                f"confidence={d['confidence']}, "
+                f"status={d['methodology_status']}; inputs: {inputs})"
             )
     if evidence.notes:
         lines += ["", "Data caveats:"]
