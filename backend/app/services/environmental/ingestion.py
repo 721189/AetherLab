@@ -15,6 +15,7 @@ flattened EnvironmentalReading snapshot is derived only for API compatibility.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Dict, List
 
@@ -25,13 +26,75 @@ from app.schemas.environmental import EnvironmentalObservation
 
 
 class EnvironmentalObservationRepository:
-    """Persistence for canonical observations."""
+    """Persistence for canonical observations.
+
+    Persistence is **batch-atomic** and **idempotent**:
+
+    - ``create_many`` inserts the whole batch in a single transaction and
+      rolls back completely if anything fails — no partial batch is ever
+      committed.
+    - Every observation is tagged with ``observation_hash`` (SHA-256 of the
+      canonical dedup key: source + dataset + product + scene_id + variable +
+      location + observed_at). Pre-existing rows with the same hash are
+      skipped, so a Celery retry or re-fetching the same satellite scene can
+      never produce a duplicate observation.
+    """
 
     def __init__(self, db: Session):
         self.db = db
 
-    def create_from(self, obs: EnvironmentalObservation) -> EnvironmentalObservationRecord:
-        record = EnvironmentalObservationRecord(
+    @staticmethod
+    def compute_observation_hash(obs: EnvironmentalObservation) -> str:
+        """SHA-256 over the canonical dedup key for one observation.
+
+        The key intentionally excludes the numeric value and retrieval time:
+        the same measurement (same source scene, variable, place and time)
+        must hash identically across retries even if the provider payload
+        differs slightly.
+        """
+        scene_id = None
+        if isinstance(obs.provenance, dict):
+            scene_id = obs.provenance.get("scene_id")
+
+        canonical = json.dumps(
+            {
+                "source": obs.source,
+                "dataset": obs.dataset,
+                "product": obs.product,
+                "scene_id": scene_id,
+                "variable": obs.variable,
+                "location": (round(obs.latitude, 5), round(obs.longitude, 5)),
+                "observed_at": (
+                    EnvironmentalObservationRepository._utc(obs.observed_at).isoformat()
+                    if obs.observed_at else None
+                ),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _utc(dt: Any) -> Any:
+        """Normalise a timestamp to timezone-aware UTC.
+
+        Naive datetimes are assumed to be UTC and are tagged as such;
+        aware datetimes are converted to UTC. This guarantees everything
+        stored in ``environmental_observations`` is canonical UTC regardless
+        of what a provider returns.
+        """
+        if dt is None:
+            return None
+        from datetime import timezone
+
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def _to_record(
+        self, obs: EnvironmentalObservation
+    ) -> EnvironmentalObservationRecord:
+        return EnvironmentalObservationRecord(
             source=obs.source,
             dataset=obs.dataset,
             product=obs.product,
@@ -42,28 +105,72 @@ class EnvironmentalObservationRepository:
             latitude=obs.latitude,
             longitude=obs.longitude,
             location_name=obs.location_name,
-            observed_at=obs.observed_at,
-            acquisition_time=obs.acquisition_time,
-            retrieved_at=obs.retrieved_at,
+            observed_at=self._utc(obs.observed_at),
+            acquisition_time=self._utc(obs.acquisition_time),
+            retrieved_at=self._utc(obs.retrieved_at),
             averaging_period=obs.averaging_period,
             resolution=obs.resolution,
             quality=obs.quality,
-            quality_flags=json.dumps(obs.quality_flags) if obs.quality_flags else None,
-            provenance=json.dumps(obs.provenance) if obs.provenance else None,
+            # JSONB columns accept native dicts on PostgreSQL (and serialise
+            # them as JSON on SQLite) — do NOT json.dumps here.
+            quality_flags=obs.quality_flags if obs.quality_flags else None,
+            provenance=obs.provenance if obs.provenance else None,
             uncertainty=obs.uncertainty,
             confidence=obs.confidence,
             quality_score=obs.quality_score,
             data_completeness=obs.data_completeness,
+            observation_hash=self.compute_observation_hash(obs),
         )
-        self.db.add(record)
+
+    def create_from(
+        self, obs: EnvironmentalObservation
+    ) -> EnvironmentalObservationRecord | None:
+        rec = self._to_record(obs)
+        # Idempotency pre-check: skip rows that already exist.
+        if self._hash_exists(rec.observation_hash):
+            return None
+        self.db.add(rec)
         self.db.commit()
-        self.db.refresh(record)
-        return record
+        self.db.refresh(rec)
+        return rec
+
+    def _hash_exists(self, observation_hash: str) -> bool:
+        return (
+            self.db.query(EnvironmentalObservationRecord)
+            .filter(
+                EnvironmentalObservationRecord.observation_hash == observation_hash
+            )
+            .first()
+            is not None
+        )
 
     def create_many(
         self, observations: List[EnvironmentalObservation]
     ) -> List[EnvironmentalObservationRecord]:
-        return [self.create_from(o) for o in observations]
+        """Insert a batch atomically; idempotently skip existing observations.
+
+        New rows for this batch are added to the session and committed exactly
+        once. If anything fails, the entire batch is rolled back (no partial
+        writes). Already-persisted hashes are excluded first, so a retried
+        batch never inserts duplicates and never fails on a UNIQUE violation.
+        """
+        records: List[EnvironmentalObservationRecord] = []
+        for obs in observations:
+            rec = self._to_record(obs)
+            if self._hash_exists(rec.observation_hash):
+                continue  # already collected — idempotent skip
+            self.db.add(rec)
+            records.append(rec)
+
+        if not records:
+            return []
+
+        try:
+            self.db.commit()
+        except Exception:
+            self.db.rollback()  # atomic: no partial batch
+            raise
+        return records
 
 
 class ProviderRegistry:

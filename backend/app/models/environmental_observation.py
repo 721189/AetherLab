@@ -1,10 +1,17 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, func
+from sqlalchemy import (
+    JSON, DateTime, Float, ForeignKey, Index, Integer, String, func, text,
+)
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+# Cross-dialect JSON: native JSONB on PostgreSQL (queryable, indexed),
+# plain JSON (TEXT) on SQLite so the hermetic unit suite still works.
+JSON_COLUMN = JSON().with_variant(JSONB(), "postgresql")
 
 
 class EnvironmentalObservationRecord(Base):
@@ -35,15 +42,15 @@ class EnvironmentalObservationRecord(Base):
 
     # Where / when
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
-    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=True)
     location_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     location_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("monitored_locations.id", ondelete="SET NULL"), nullable=True
     )
 
-    observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    acquisition_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    retrieved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acquisition_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Scientific semantics & provenance
     averaging_period: Mapped[str] = mapped_column(
@@ -53,20 +60,28 @@ class EnvironmentalObservationRecord(Base):
     quality: Mapped[str] = mapped_column(
         String(20), nullable=False, default="unverified"
     )
-    quality_flags: Mapped[str | None] = mapped_column(
-        String(1024), nullable=True  # JSON-encoded dict
-    )
-
     # Explicit uncertainty model
     uncertainty: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     data_completeness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    # Immutable provenance bundle (JSON): collection, scene_id, processing
-    # algorithm/version, software version, CRS, AOI, cloud %, bands...
-    provenance: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # Immutable provenance bundle (JSONB on PostgreSQL, JSON on SQLite):
+    # collection, scene_id, processing algorithm/version, software version,
+    # CRS, AOI, cloud %, bands...
+    provenance: Mapped[dict | None] = mapped_column(JSON_COLUMN, nullable=True)
+    quality_flags: Mapped[dict | None] = mapped_column(JSON_COLUMN, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # SHA-256 of the canonical dedup key (source + dataset + product +
+    # scene_id + variable + location + observed_at). Enforces idempotency:
+    # Celery retries or duplicate satellite scenes cannot produce duplicate
+    # observation rows.
+    observation_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     __table_args__ = (
         Index("ix_env_obs_variable_time", "variable", "observed_at"),
