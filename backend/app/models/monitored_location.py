@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Boolean, Float, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, Boolean, Float, ForeignKey, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -34,7 +34,14 @@ class MonitoredLocation(Base):
     radius: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
 
     enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=func.true(), index=True
+        Boolean,
+        nullable=False,
+        default=True,
+        # NOTE: text("true"), NOT func.true() -- func.true() renders as
+        # `true()` which is invalid SQL on PostgreSQL (fine on SQLite, which
+        # is exactly why the unit suite never caught it).
+        server_default=text("true"),
+        index=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
