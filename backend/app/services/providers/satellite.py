@@ -193,6 +193,11 @@ class NASAProvider:
                     acquisition_time=scene.acquisition_time,
                     observed_at=scene.acquisition_time,
                     retrieved_at=now,
+                    averaging_period="24-hour",  # POWER daily means
+                    uncertainty=1.0 if variable == "temperature" else None,
+                    confidence=0.8,  # model assimilation, not in-situ measurement
+                    quality_score=80.0,
+                    data_completeness=len(observations) / len(self.PARAMETERS),
                     quality_flags={"fill_value_masked": True},
                     provenance={
                         "provider": "nasa",

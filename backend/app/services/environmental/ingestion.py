@@ -50,6 +50,10 @@ class EnvironmentalObservationRepository:
             quality=obs.quality,
             quality_flags=json.dumps(obs.quality_flags) if obs.quality_flags else None,
             provenance=json.dumps(obs.provenance) if obs.provenance else None,
+            uncertainty=obs.uncertainty,
+            confidence=obs.confidence,
+            quality_score=obs.quality_score,
+            data_completeness=obs.data_completeness,
         )
         self.db.add(record)
         self.db.commit()

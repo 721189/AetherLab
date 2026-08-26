@@ -128,6 +128,34 @@ class ConversationService:
         system_prompt = agent.system_prompt or DEFAULT_SYSTEM_PROMPT
         return model, system_prompt, temperature, max_tokens
 
+    def _grounded_system_prompt(self, content: str, system_prompt: str) -> str:
+        """Augment the system prompt with an evidence bundle when available.
+
+        Failure-safe: any evidence-layer problem degrades to the plain prompt
+        rather than breaking chat.
+        """
+        try:
+            from app.services.intelligence import (
+                EvidenceBuilder,
+                format_evidence_context,
+            )
+
+            evidence = EvidenceBuilder(self.db).build(content)
+            if not evidence.derived_metrics and not evidence.observations:
+                return system_prompt  # nothing relevant stored; plain chat
+            return (
+                f"{system_prompt}\n\n"
+                "=== GROUNDING EVIDENCE (AetherLab environmental database) ===\n"
+                f"{format_evidence_context(evidence)}"
+            )
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Evidence grounding failed; falling back to plain prompt"
+            )
+            return system_prompt
+
     def send_message(
         self,
         conv_id: int,
@@ -163,7 +191,7 @@ class ConversationService:
         provider = get_llm_provider(model)
         response_text = provider.generate_response(
             messages=messages,
-            system_prompt=system_prompt,
+            system_prompt=self._grounded_system_prompt(content, system_prompt),
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -252,7 +280,9 @@ class ConversationService:
             try:
                 for chunk in provider.stream_response(
                     messages=messages,
-                    system_prompt=system_prompt,
+                    system_prompt=self._grounded_system_prompt(
+                        content, system_prompt
+                    ),
                     temperature=temperature,
                     max_tokens=max_tokens,
                 ):

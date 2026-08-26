@@ -118,14 +118,20 @@ class OpenAQProvider(EnvironmentalProvider):
                     location_name=location_name,
                     observed_at=observed,
                     retrieved_at=now,
+                    averaging_period="unknown",  # instantaneous sensor reading
                     provenance={
                         "provider": "openaq",
-                        "collection": "sentinel-free-air-quality",
+                        "collection": "openaq-v3",
                         "site_id": site_id,
                         "sensor_id": sensor_id,
                         "api_version": "v3",
                         "retrieved_at": now.isoformat(),
                     },
+                    confidence=0.85,     # verified station, instantaneous sample
+                    quality_score=85.0,
+                    data_completeness=len(sensor_params) and (
+                        len(readings) / max(len(sensor_params), 1)
+                    ),
                     quality="verified",
                 )
             )

@@ -8,10 +8,10 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00?logo=sqlalchemy)](https://www.sqlalchemy.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-129%20passing-2ea44f)]()
+[![Tests](https://img.shields.io/badge/Tests-261%20passing-2ea44f)]()
 [![License](https://img.shields.io/badge/License-View%20LICENSE-blue)](/LICENSE)
 
-AetherLab is an **intelligent environmental intelligence platform** that combines **geospatial data, live weather, air quality, satellite imagery, and autonomous AI agents** into one secure, production-grade product. Users monitor the world around them, manage projects and agents, and converse with AI assistants backed by interchangeable LLM providers — all served by a **FastAPI** backend and a **Next.js** frontend.
+AetherLab is an **environmental intelligence platform** that combines **geospatial data, live weather, air quality, satellite/reanalysis environmental data, and evidence-grounded AI agents** into one secure, production-grade product. Users monitor the world around them, manage projects and agents, and query an AI assistant whose answers are anchored to retrieved observations with explicit provenance and uncertainty — all served by a **FastAPI** backend and a **Next.js** frontend.
 
 > This project is engineered to enterprise standards: layered architecture, versioned APIs, token rotation, rate limiting, structured logging, Prometheus metrics, a 261-test suite, containerized frontend deployment, and GitHub Actions CI/CD.
 
@@ -27,7 +27,8 @@ AetherLab is an **intelligent environmental intelligence platform** that combine
 | **💬 Conversations** | Persistent per-project chat history with an LLM-powered reply flow |
 | **🌍 Environmental** | Provider-adapter ingestion via a **ProviderRegistry**: OpenWeather, OpenAQ v3, **NASA POWER meteorology (MERRA-2 reanalysis)** and **Copernicus CDSE / Sentinel-5P NO₂** — all normalised into a canonical `EnvironmentalObservation` model with full **provenance** persisted to an `environmental_observations` table; **real EPA-breakpoint AQI with explicit methodology status**; Redis-cached provider calls; user-owned `monitored_locations`; Celery fan-out ingestion every 15 min |
 | **🛡️ Abuse protection** | **Redis-backed distributed rate limiting** (shared across replicas) + provider response cache so repeat requests never re-hit paid APIs |
-| **🧩 AI Providers** | Pluggable `LLMProvider` abstraction (OpenAI impl) behind a factory. **Free Nemotron model via OpenRouter by default** |
+| **🧠 Environmental Intelligence** | Evidence layer between stored observations and the LLM: deterministic query planner → retrieval → aggregation → `EvidenceSet` (observations, derived metrics, source references, uncertainty) → grounded answer with citations |
+| **🧩 AI Providers** | Pluggable `LLMProvider` abstraction behind a factory. **Free Nemotron model via OpenRouter by default**; the assistant is evidence-grounded via the intelligence layer above |
 | **📈 Observability** | **Prometheus metrics** (`/metrics` scrape endpoint) with per-request counts & latency histograms, Sentry error/performance monitoring, JSON structured logging with request-ID correlation |
 | **🛡️ Hardening** | Rate limiting (slowapi), health-check liveness probes, CORS policy, JWT secret validation, sensitive-data log redaction |
 | **🖥️ Frontend** | Next.js 15 app for auth, dashboard, projects, agents, chat & environmental maps/gauges, with server-side auth middleware & error boundaries |
@@ -380,6 +381,23 @@ Responses include the structured `429` body `{ "detail": "Rate limit exceeded", 
 
 > Tests run with the limiter **disabled** (conftest autouse fixture) so the full 261-test suite never trips a per-IP cap.
 >
+### Evidence-grounded AI
+
+The assistant is not a generic chatbot with data access. Questions are routed
+through an evidence pipeline:
+
+```
+question -> plan_query() -> retrieve stored observations
+        -> aggregate/derive (means +/- spread, AQI nowcast w/ methodology status)
+        -> EvidenceSet (observations + metrics + source references + uncertainty)
+        -> grounded system prompt -> answer with citations
+```
+
+The planner is deterministic and auditable; the LLM only sees structured
+evidence from AetherLab's own database and is instructed to cite sources and
+admit gaps. Data completeness and overall confidence are reported alongside
+every answer.
+
 ### Scientific-integrity guarantees
 
 Institutional/research consumers can rely on these invariants (all enforced by tests):

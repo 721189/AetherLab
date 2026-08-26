@@ -56,6 +56,12 @@ class EnvironmentalObservationRecord(Base):
     quality_flags: Mapped[str | None] = mapped_column(
         String(1024), nullable=True  # JSON-encoded dict
     )
+
+    # Explicit uncertainty model
+    uncertainty: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    data_completeness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # Immutable provenance bundle (JSON): collection, scene_id, processing
     # algorithm/version, software version, CRS, AOI, cloud %, bands...
     provenance: Mapped[str | None] = mapped_column(String(2048), nullable=True)

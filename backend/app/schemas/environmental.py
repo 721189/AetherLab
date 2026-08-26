@@ -102,6 +102,31 @@ class EnvironmentalObservation(BaseModel):
             "window per pollutant; 'unknown' marks instantaneous readings."
         ),
     )
+    uncertainty: Optional[float] = Field(
+        default=None,
+        description="Provider-stated or estimated measurement uncertainty (+/- in unit)",
+    )
+    confidence: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in this single observation (0..1)",
+    )
+    quality_score: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+        description="Numeric quality score (0-100) complementing the quality flag",
+    )
+    data_completeness: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of expected variables actually delivered by the source "
+            "in this fetch (0..1)"
+        ),
+    )
     provenance: dict = Field(
         default_factory=dict,
         description=(

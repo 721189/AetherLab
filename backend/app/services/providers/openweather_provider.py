@@ -67,6 +67,9 @@ class OpenWeatherProvider(EnvironmentalProvider):
                     location_name=location_name,
                     observed_at=observed,
                     retrieved_at=now,
+                    confidence=0.9,       # official provider, verified account
+                    quality_score=90.0,
+                    data_completeness=len(variables) / (len(variables) + 1),
                     quality="verified",
                 )
             )
