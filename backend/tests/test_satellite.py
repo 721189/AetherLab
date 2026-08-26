@@ -80,9 +80,11 @@ class TestNASAProvider:
         temp = by_var["temperature"]
         assert isinstance(temp, EnvironmentalObservation)
         assert temp.value == 31.2
-        # Provenance is complete and human-presentable.
+        # Provenance is complete and human-presentable; POWER data is always
+        # labelled as MERRA-2 reanalysis, never as satellite imagery.
         assert temp.source == "nasa"
-        assert temp.dataset == "POWER T2M"
+        assert temp.dataset == "POWER (MERRA-2 reanalysis) T2M"
+        assert temp.product == "reanalysis-daily-point"
         assert temp.processing_level == "L3"
         assert temp.resolution
         assert temp.acquisition_time is not None

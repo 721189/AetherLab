@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from app.core import provider_cache as pc
 from app.services.providers.base import ProviderError
 from app.services.providers.openweather_provider import OpenWeatherProvider
@@ -45,6 +47,63 @@ class TestMemoryBackend:
 
     def test_miss_returns_none(self):
         assert pc.get_cached("envcache:nothing") is None
+
+
+class TestDatasetAwareCacheKeys:
+    def test_same_coords_different_products_differ(self):
+        k2 = pc.build_cache_key("copernicus", 28.61, 77.20,
+                                dataset="Sentinel-2 L2A")
+        k5 = pc.build_cache_key("copernicus", 28.61, 77.20,
+                                dataset="Sentinel-5P L2 NO2")
+        assert k2 != k5  # same AOI, completely different datasets
+
+    def test_bands_and_options_participate(self):
+        base = pc.build_cache_key("copernicus", 1.0, 2.0, bands=["B04", "B08"])
+        other_bands = pc.build_cache_key("copernicus", 1.0, 2.0, bands=["B03"])
+        reordered = pc.build_cache_key("copernicus", 1.0, 2.0, bands=["B08", "B04"])
+        assert base != other_bands
+        assert base == reordered  # band ORDER must not matter
+
+    def test_scene_id_participates(self):
+        a = pc.build_cache_key("nasa", 1.0, 2.0, scene_id="POWER-2026-08-24")
+        b = pc.build_cache_key("nasa", 1.0, 2.0, scene_id="POWER-2026-08-25")
+        assert a != b
+
+    def test_options_participate(self):
+        a = pc.build_cache_key("copernicus", 1.0, 2.0, options={"cloud": 20})
+        b = pc.build_cache_key("copernicus", 1.0, 2.0, options={"cloud": 80})
+        assert a != b
+
+
+class TestRateLimiterStorageResolution:
+    """Production MUST NOT silently degrade to per-process memory storage."""
+
+    def _resolve_with(self, monkeypatch, app_env, redis_url):
+        from app.core import rate_limiter as rl
+
+        monkeypatch.setattr(rl.settings, "APP_ENV", app_env)
+        monkeypatch.setattr(rl.settings, "REDIS_URL", redis_url)
+        return rl._resolve_storage_uri()
+
+    def test_development_falls_back_to_memory(self, monkeypatch):
+        result = self._resolve_with(
+            monkeypatch, "development",
+            "redis://localhost:59999/0",  # nothing listens here
+        )
+        assert result == "memory://"
+
+    def test_production_fails_closed_when_redis_unreachable(self, monkeypatch):
+        with pytest.raises(RuntimeError) as exc_info:
+            self._resolve_with(
+                monkeypatch, "production", "redis://localhost:59999/0"
+            )
+        assert "refusing to start" in str(exc_info.value)
+
+    def test_testing_falls_back_to_memory(self, monkeypatch):
+        result = self._resolve_with(
+            monkeypatch, "testing", "redis://localhost:59999/0"
+        )
+        assert result == "memory://"
 
 
 class TestServiceIntegration:

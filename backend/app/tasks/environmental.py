@@ -56,46 +56,60 @@ async def collect_for_location_async(
     lon: float,
     location_name: str,
 ) -> Dict[str, Any]:
-    """Async orchestration for one location: fetch both sources, persist.
+    """Async orchestration for one location — canonical ingestion path.
 
-    The DB session stays synchronous (the project uses standard SQLAlchemy);
-    only the HTTP fetches are awaited, concurrently via asyncio.gather so a
-    slow weather response never delays the air-quality request.
+    All providers flow through EnvironmentalIngestionService, which persists
+    canonical EnvironmentalObservation records; a flattened legacy snapshot
+    is derived afterwards purely for API compatibility.
     """
-    from app.services.environmental_service import EnvironmentalService
+    from app.services.environmental import EnvironmentalIngestionService
 
     db = _session()
     try:
-        service = EnvironmentalService(db)
+        ingestion = EnvironmentalIngestionService(db)
+        summary: Dict[str, Any] = {
+            "location": location_name,
+            "weather": False,
+            "air_quality": False,
+        }
 
         async def _safe(coro, label):
             try:
                 return await coro
             except Exception as exc:  # provider errors must not kill the batch
-                return {"error": f"{label} fetch failed: {exc}"}
+                return {"error": f"{label} failed: {exc}"}
 
-        weather, air = await asyncio.gather(
-            _safe(
-                service.fetch_weather(lat, lon, location_name), "weather"
-            ),
-            _safe(
-                service.fetch_air_quality(lat, lon, location_name), "air quality"
-            ),
+        weather_obs, air_obs = await asyncio.gather(
+            _safe(ingestion.ingest_weather(lat, lon, location_name), "weather"),
+            _safe(ingestion.ingest_air_quality(lat, lon, location_name), "air quality"),
         )
 
-        summary: Dict[str, Any] = {
-            "location": location_name,
-            "weather": "error" not in weather,
-            "air_quality": "error" not in air,
-        }
-        if summary["weather"]:
-            service.save_reading(weather)
+        if isinstance(weather_obs, list) and weather_obs:
+            summary["weather"] = True
         else:
-            summary["weather_error"] = weather["error"]
-        if summary["air_quality"]:
-            service.save_reading(air)
+            summary["weather_error"] = weather_obs.get("error", "no data")
+        if isinstance(air_obs, list) and air_obs:
+            summary["air_quality"] = True
         else:
-            summary["air_quality_error"] = air["error"]
+            summary["air_quality_error"] = air_obs.get("error", "no data")
+
+        # Derived legacy snapshot for API compatibility (best-effort).
+        if summary["weather"] or summary["air_quality"]:
+            try:
+                payload = EnvironmentalIngestionService.derive_reading_payload(
+                    lat,
+                    lon,
+                    location_name,
+                    weather_obs if isinstance(weather_obs, list) else [],
+                    air_obs if isinstance(air_obs, list) else [],
+                )
+                if payload:
+                    from app.services.environmental_service import EnvironmentalService
+
+                    EnvironmentalService(db).save_reading(payload)
+            except Exception:
+                pass  # canonical data is already persisted; snapshot is optional
+
         return summary
     finally:
         db.close()
@@ -116,6 +130,46 @@ def collect_location(
 ) -> Dict[str, Any]:
     """Collect readings for a single location."""
     return collect_for_location(lat, lon, location_name)
+
+
+@celery_app.task(name="app.tasks.environmental.collect_satellite")
+def collect_satellite(
+    lat: float,
+    lon: float,
+    location_name: str = "",
+    source: str = "nasa",
+) -> Dict[str, Any]:
+    """Ingest satellite observations for one location via the canonical path.
+
+    Dispatchable per-source so NASA POWER meteorology and Copernicus
+    Sentinel-5P catalogue products run as independent queue messages.
+    """
+    import asyncio
+
+    from app.services.environmental import EnvironmentalIngestionService
+
+    db = _session()
+    try:
+        ingestion = EnvironmentalIngestionService(db)
+        try:
+            observations = asyncio.run(
+                ingestion.ingest_satellite(lat, lon, location_name, source=source)
+            )
+        except Exception as exc:
+            return {
+                "location": location_name or f"{lat},{lon}",
+                "source": source,
+                "ok": False,
+                "error": str(exc),
+            }
+        return {
+            "location": location_name or f"{lat},{lon}",
+            "source": source,
+            "ok": True,
+            "observations": len(observations),
+        }
+    finally:
+        db.close()
 
 
 def discover_locations() -> List[Dict[str, Any]]:

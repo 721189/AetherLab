@@ -104,9 +104,17 @@ class TestOpenAQV3Adapter:
         expected = calculate_overall_aqi(
             {o.variable: o.value for o in observations},
             units={o.variable: o.unit for o in observations},
+            averaging_periods={o.variable: o.averaging_period
+                               for o in observations},
         )
-        assert payload["aqi"] == expected
-        # pm25 of 35.2 sits in the Unhealthy-for-Sensitive-Groups band.
+        assert payload["aqi"] == expected["aqi"]
+        # Instantaneous OpenAQ readings are NOT EPA-averaged windows — the
+        # AQI must be labelled indicative, never standard-derived.
+        assert expected["methodology_status"] == "non_standard_averaging"
+        assert payload["aqi_methodology"]["methodology_status"] == (
+            "non_standard_averaging"
+        )
+        # pm25 of 40 sits in the Unhealthy-for-Sensitive-Groups band.
         assert payload["aqi"] > 100
 
     def test_no_nearby_location_raises_provider_error(self):

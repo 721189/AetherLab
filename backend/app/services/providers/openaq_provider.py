@@ -134,10 +134,13 @@ class OpenAQProvider(EnvironmentalProvider):
     ) -> Optional[dict]:
         """Flatten observations into the legacy reading-dict shape used by the DB.
 
-        AQI is computed with the real EPA breakpoint methodology in
-        :mod:`app.core.aqi` — no more placeholder multipliers.
+        AQI is computed with the real EPA breakpoint methodology
+        (:mod:`app.core.aqi`). OpenAQ "latest" values are *instantaneous*
+        sensor readings, NOT EPA-averaged windows — so every AQI produced here
+        carries ``methodology_status="non_standard_averaging"`` and is
+        explicitly labelled indicative rather than standard-derived.
         """
-        from app.core.aqi import calculate_aqi, calculate_overall_aqi
+        from app.core.aqi import calculate_overall_aqi
 
         pollutants = {}
         units = {}
@@ -149,15 +152,20 @@ class OpenAQProvider(EnvironmentalProvider):
         if not pollutants:
             return None
 
-        sub_indices = {
-            p: calculate_aqi(p, v, unit=u)
-            for p, (v, u) in ((p, (pollutants[p], units[p])) for p in pollutants)
-        }
+        aqi_record = calculate_overall_aqi(
+            pollutants,
+            units=units,
+            averaging_periods={p: o.averaging_period for p, o in
+                               ((o.variable, o) for o in observations)
+                               if p in pollutants},
+        )
         return {
             "location_name": location_name,
             "lat": lat,
             "lon": lon,
-            "aqi": calculate_overall_aqi(pollutants, units=units),
+            "aqi": aqi_record["aqi"],
+            # Scientific provenance for the AQI number itself.
+            "aqi_methodology": aqi_record,
             "pm25": pollutants.get("pm25"),
             "pm10": pollutants.get("pm10"),
             "no2": pollutants.get("no2"),

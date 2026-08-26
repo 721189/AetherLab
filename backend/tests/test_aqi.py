@@ -10,6 +10,7 @@ import pytest
 from app.core.aqi import (
     aqi_category,
     calculate_aqi,
+    calculate_aqi_detailed,
     calculate_overall_aqi,
     convert_to_index_unit,
 )
@@ -32,8 +33,9 @@ class TestPM25KnownValues:
             (125.4, 150),
             (125.5, 151),
             (225.5, 201),
-            (500.0, 500),   # capped at table max
-            (900.0, 500),   # beyond-table clamp
+            (425.4, 500),   # last published breakpoint
+            (425.5, None),  # beyond the table -> NO extrapolation
+            (900.0, None),  # beyond the table -> flagged out_of_standard_range
         ],
     )
     def test_reference_points(self, conc, expected):
@@ -100,16 +102,96 @@ class TestOverallAQI:
     def test_max_of_sub_indices(self):
         # pm25 40 -> ~113 dominates over pm10 60 (~53).
         overall = calculate_overall_aqi({"pm25": 40.0, "pm10": 60.0})
-        assert overall == calculate_aqi("pm25", 40.0)
-        assert overall > 100
+        assert overall["aqi"] == calculate_aqi("pm25", 40.0)
+        assert overall["aqi"] > 100
+        assert overall["dominant_pollutant"] == "pm25"
 
     def test_missing_pollutants_are_skipped(self):
-        assert calculate_overall_aqi({"pm25": None, "no2": None}) is None
+        assert calculate_overall_aqi({"pm25": None, "no2": None})["aqi"] is None
         # Mixed present/missing still works.
-        assert calculate_overall_aqi({"pm25": None, "pm10": 54}) == 50
+        assert calculate_overall_aqi({"pm25": None, "pm10": 54})["aqi"] == 50
 
     def test_empty(self):
-        assert calculate_overall_aqi({}) is None
+        record = calculate_overall_aqi({})
+        assert record["aqi"] is None
+        assert record["methodology_status"] == "no_usable_data"
+
+    def test_overall_record_carries_methodology_status(self):
+        record = calculate_overall_aqi(
+            {"pm25": 12.0},
+            averaging_periods={"pm25": "24-hour"},
+        )
+        assert record["methodology_status"] == "standard"
+        sub = record["sub_indices"][0]
+        assert sub["averaging_period"] == "24-hour"
+
+
+class TestTruncationRules:
+    """EPA prescribes truncation (never rounding up) before the lookup."""
+
+    def test_pm25_truncates_to_one_decimal(self):
+        from app.core.aqi import preprocess_concentration
+
+        assert preprocess_concentration("pm25", 12.349) == 12.3   # not 12.3->12.35
+        assert preprocess_concentration("pm25", 12.35) == 12.3    # truncates DOWN
+
+    def test_pm10_truncates_to_integer(self):
+        from app.core.aqi import preprocess_concentration
+
+        assert preprocess_concentration("pm10", 154.9) == 154.0
+
+    def test_o3_truncates_to_integer_ppb(self):
+        from app.core.aqi import preprocess_concentration
+
+        assert preprocess_concentration("o3", 70.9) == 70.0
+
+    def test_truncation_affects_boundary_results(self):
+        # 9.05 ug/m3 truncates to 9.0 -> exactly the Good/Moderate boundary.
+        assert calculate_aqi("pm25", 9.05) == 50
+
+
+class TestOutOfStandardRange:
+    def test_beyond_table_returns_no_value_and_flags_it(self):
+        result = calculate_aqi_detailed("o3", 250, unit="ppb",
+                                        averaging_period="8h")
+        assert result.aqi is None  # EPA table ends at 200 ppb
+        assert result.methodology_status == "out_of_standard_range"
+        assert "no extrapolation performed" in " ".join(result.notes)
+
+    def test_pm25_beyond_425_is_flagged_not_capped(self):
+        result = calculate_aqi_detailed("pm25", 500.0)
+        assert result.aqi is None
+        assert result.methodology_status == "out_of_standard_range"
+
+    def test_within_table_still_standard(self):
+        result = calculate_aqi_detailed("pm25", 12.0)
+        assert result.aqi == 56
+        assert result.methodology_status == "non_standard_averaging"  # no window asserted
+
+        standard = calculate_aqi_detailed(
+            "pm25", 12.0, averaging_period="24-hour"
+        )
+        assert standard.methodology_status == "standard"
+
+
+class TestAveragingPeriodSemantics:
+    def test_wrong_window_raises(self):
+        with pytest.raises(ValueError):
+            calculate_aqi("pm25", 12.0, averaging_period="1-hour")
+
+    def test_correct_window_accepted(self):
+        assert calculate_aqi("pm25", 12.0, averaging_period="24h") == 56
+
+    def test_missing_window_flags_non_standard(self):
+        result = calculate_aqi_detailed("no2", 100, unit="ppb")
+        assert result.methodology_status == "non_standard_averaging"
+
+    def test_overall_demotes_on_any_nonstandard_input(self):
+        record = calculate_overall_aqi(
+            {"pm25": 12.0, "pm10": 50.0},
+            averaging_periods={"pm25": "24-hour"},  # pm10 window unknown
+        )
+        assert record["methodology_status"] == "non_standard_averaging"
 
 
 class TestValidation:

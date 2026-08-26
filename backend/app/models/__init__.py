@@ -1,5 +1,6 @@
 from app.models.agent import Agent
 from app.models.conversation import Conversation
+from app.models.environmental_observation import EnvironmentalObservationRecord
 from app.models.environmental_reading import EnvironmentalReading
 from app.models.message import Message
 from app.models.monitored_location import MonitoredLocation
@@ -15,6 +16,7 @@ __all__ = [
     "Conversation",
     "Message",
     "EnvironmentalReading",
+    "EnvironmentalObservationRecord",
     "MonitoredLocation",
 ]
 

@@ -78,14 +78,12 @@ class TestAQICalculation:
     def test_service_uses_epa_breakpoint_method(self):
         from app.core.aqi import calculate_overall_aqi
 
-        # PM2.5 150 ug/m3 -> sub-index ~186 dominates.
-        assert (
-            calculate_overall_aqi({"pm25": 150.0, "pm10": 40.0})
-            == calculate_overall_aqi({"pm25": 150.0})
-            > 100
-        )
-        # No usable pollutants -> None.
-        assert calculate_overall_aqi({}) is None
+        # PM2.5 150 ug/m3 -> sub-index ~125 dominates.
+        record = calculate_overall_aqi({"pm25": 150.0, "pm10": 40.0})
+        assert record["aqi"] == calculate_overall_aqi({"pm25": 150.0})["aqi"]
+        assert record["aqi"] > 100
+        # No usable pollutants -> no value.
+        assert calculate_overall_aqi({})["aqi"] is None
 
 
 class TestWeatherNoKey:

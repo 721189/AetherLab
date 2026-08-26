@@ -47,8 +47,10 @@ class OpenWeatherProvider(EnvironmentalProvider):
             "pressure": ("hPa", main.get("pressure")),
             "wind_speed": ("m/s", wind.get("speed")),
             "wind_direction": ("degrees", wind.get("deg")),
-            "uv_index": ("index", data.get("uv_index")),
         }
+        # NOTE: uv_index deliberately NOT ingested here — the /data/2.5/weather
+        # current-weather endpoint does not reliably return it; it belongs to a
+        # separate OpenWeather UV product and would silently be None/stale.
 
         observations: List[EnvironmentalObservation] = []
         for variable, (unit, value) in variables.items():

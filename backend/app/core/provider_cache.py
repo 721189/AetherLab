@@ -19,7 +19,7 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
 
@@ -50,13 +50,46 @@ def _redis():
     return _CLIENT
 
 
-def build_cache_key(provider: str, lat: float, lon: float, window: str = "") -> str:
-    """Stable cache key: provider + coords rounded to ~110 m + time window."""
-    rounded_lat = round(float(lat), 3)
-    rounded_lon = round(float(lon), 3)
-    raw = f"{provider}:{rounded_lat}:{rounded_lon}:{window}"
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
-    return f"envcache:{provider}:{digest}"
+def build_cache_key(
+    provider: str,
+    lat: float,
+    lon: float,
+    window: str = "",
+    *,
+    dataset: Optional[str] = None,
+    product: Optional[str] = None,
+    scene_id: Optional[str] = None,
+    bands: Optional[List[str]] = None,
+    resolution: Optional[str] = None,
+    options: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Structured, dataset-aware cache key.
+
+    For EO products a provider+coords key is dangerously insufficient —
+    Sentinel-2 vs Sentinel-5P vs Sentinel-3 over the same AOI are completely
+    different datasets. Every dimension that changes the answer participates:
+
+        provider | dataset | product | scene_id | rounded AOI
+        | time window | bands | resolution | processing options
+
+    The dimensions are canonicalised (sorted JSON) then hashed, so key order
+    never matters.
+    """
+    structured = {
+        "provider": provider.lower(),
+        "lat": round(float(lat), 3),   # ~110 m — nearby queries share entries
+        "lon": round(float(lon), 3),
+        "window": str(window),
+        "dataset": dataset or "",
+        "product": product or "",
+        "scene_id": scene_id or "",
+        "bands": sorted(bands) if bands else [],
+        "resolution": resolution or "",
+        "options": options or {},
+    }
+    canonical = json.dumps(structured, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
+    return f"envcache:{provider.lower()}:{digest}"
 
 
 def get_cached(key: str) -> Optional[Dict[str, Any]]:

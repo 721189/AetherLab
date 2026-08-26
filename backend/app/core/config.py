@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # paid API calls for repeated/nearby coordinate requests.
     PROVIDER_CACHE_TTL_SECONDS: int = 900
 
+    # Copernicus Data Space Ecosystem credentials (Sentinel-5P NO2 extraction).
+    # Catalogue search/metadata work without them.
+    COPERNICUS_USERNAME: str = ""
+    COPERNICUS_PASSWORD: str = ""
+
     # LLM configuration. OpenRouter hosts free Nemotron models and is preferred
     # when its API key is present. LLM_MODEL overrides the default model.
     OPENROUTER_API_KEY: str = ""

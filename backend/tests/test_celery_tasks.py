@@ -7,10 +7,13 @@ calls are monkeypatched, keeping the suite offline and deterministic.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import ast
+import inspect
+from datetime import datetime, timezone
 
 import pytest
 
+from app.schemas.environmental import EnvironmentalObservation
 from app.tasks import environmental as env_tasks
 from app.tasks.celery_app import ENVIRONMENTAL_COLLECTION_INTERVAL_SECONDS, celery_app
 
@@ -27,46 +30,64 @@ def eager_celery(monkeypatch):
 
 @pytest.fixture
 def fake_db(monkeypatch):
-    """Replace the real DB session with an in-test recording double.
+    """Replace the real DB + ingestion service with recording doubles.
 
-    The fake service mirrors the REAL service's execution model: its fetch
-    methods are ``async def`` returning plain dicts. This is exactly what lets
-    ``test_collect_location_executes_environmental_fetches`` catch the classic
-    sync/async mixing bug — if the task ever treated coroutines as results,
-    these assertions would fail.
+    The fakes mirror the REAL pipeline's execution model: ingestion methods
+    are ``async def`` returning lists of canonical EnvironmentalObservation
+    records. This is what lets ``test_collect_location_executes_environmental_fetches``
+    catch the classic sync/async mixing bug -- if the task ever treated
+    coroutines as results, these assertions would fail.
     """
     created: list = []
     calls = {"weather": 0, "air_quality": 0}
 
-    class FakeRepo:
-        def create(self, data):
-            created.append(data)
-            return SimpleNamespace(**data)
+    def _obs(variable, value, unit, source, name):
+        return EnvironmentalObservation(
+            source=source,
+            variable=variable,
+            value=value,
+            unit=unit,
+            latitude=0.0,
+            longitude=0.0,
+            location_name=name,
+            observed_at=datetime.now(timezone.utc),
+            averaging_period="unknown",
+        )
 
-    class FakeService:
+    class FakeIngestion:
+        """Records every canonical observation it 'persists'."""
+
         def __init__(self, db):
             self.db = db
 
-        async def fetch_weather(self, lat, lon, name):
+        async def ingest_weather(self, lat, lon, name):
             calls["weather"] += 1
-            return {"location_name": name, "temperature": 21.5, "source": "openweather"}
+            observations = [
+                _obs("temperature", 21.5, "celsius", "openweather", name)
+            ]
+            created.extend(observations)
+            return observations
 
-        async def fetch_air_quality(self, lat, lon, name):
+        async def ingest_air_quality(self, lat, lon, name):
             calls["air_quality"] += 1
-            return {"location_name": name, "aqi": 42, "source": "openaq"}
+            observations = [_obs("pm25", 12.5, "ug/m3", "openaq", name)]
+            created.extend(observations)
+            return observations
 
-        def save_reading(self, data):
-            if "error" in data:
-                return None
-            created.append(data)
+        async def ingest_satellite(self, lat, lon, location_name="", source="nasa"):
+            # Delegates to the registry exactly like the real implementation,
+            # so tests can patch ProviderRegistry independently.
+            provider = env_pkg.ProviderRegistry.get(source)
+            scenes = await provider.search(lat, lon)
+            observations = []
+            for scene in scenes:
+                scene_id = scene if isinstance(scene, str) else scene.scene_id
+                observations.extend(
+                    await provider.retrieve(lat, lon, scene_id, location_name)
+                )
+            created.extend(observations)
+            return observations
 
-        @property
-        def repo(self):
-            return FakeRepo()
-
-    # Patch the symbol imported *inside* the task module's function body.
-    # The real session is closed in a ``finally`` block, so the double needs
-    # a matching no-op ``close()``.
     class FakeSession:
         def close(self):
             pass
@@ -74,11 +95,10 @@ def fake_db(monkeypatch):
     monkeypatch.setattr(
         env_tasks, "_session", lambda: FakeSession(), raising=True
     )
-    import app.services.environmental_service as es
+    import app.services.environmental as env_pkg
 
-    monkeypatch.setattr(es, "EnvironmentalService", FakeService)
+    monkeypatch.setattr(env_pkg, "EnvironmentalIngestionService", FakeIngestion)
     return created, calls
-
 
 
 def test_celery_app_configuration() -> None:
@@ -100,6 +120,7 @@ def test_all_expected_tasks_are_registered() -> None:
     expected = {
         "app.tasks.environmental.collect_all_locations",
         "app.tasks.environmental.collect_location",
+        "app.tasks.environmental.collect_satellite",
         "app.tasks.environmental.ping",
     }
     assert expected.issubset(celery_app.tasks)
@@ -134,40 +155,107 @@ def test_collect_location_stores_weather_and_air_quality(
 def test_collect_location_executes_environmental_fetches(
     eager_celery, fake_db
 ) -> None:
-    """Regression guard for the sync/async execution-model mismatch.
-
-    The environmental service is async; the Celery task is sync. If the task
-    ever mixed them incorrectly (calling the coroutine without awaiting it),
-    the results here would be coroutine objects / failures instead of the
-    actual fetched dictionaries asserted below.
-    """
-    import inspect
-
-    from app.services.environmental_service import EnvironmentalService
-
+    """Regression guard for the sync/async execution-model mismatch."""
     created, calls = fake_db
     from app.tasks.environmental import collect_location
 
     result = collect_location.apply(args=(28.6139, 77.2090, "New Delhi")).get()
 
-    # Both providers were actually executed.
     assert calls["weather"] == 1
     assert calls["air_quality"] == 1
-    assert result.successful() if hasattr(result, "successful") else True
-    # The task summary reflects REAL dictionaries, not coroutine objects.
+    # Real results -- never coroutine objects.
     assert isinstance(result, dict)
     assert result == {
         "location": "New Delhi",
         "weather": True,
         "air_quality": True,
     }
-    # The persisted payloads are the actual fetched dicts.
-    persisted = {d["source"]: d for d in created}
-    assert persisted["openweather"]["temperature"] == 21.5
-    assert persisted["openaq"]["aqi"] == 42
-    # Sanity: nothing anywhere returned a bare coroutine.
+    persisted = {o.variable: o for o in created}
+    assert persisted["temperature"].value == 21.5
+    assert persisted["pm25"].value == 12.5
     for data in created:
         assert not inspect.iscoroutine(data)
+
+
+def test_collect_location_uses_the_canonical_ingestion_path(
+    eager_celery, fake_db
+) -> None:
+    """Canonical EnvironmentalObservations, not legacy flattened dicts."""
+    created, _ = fake_db
+    from app.tasks.environmental import collect_location
+
+    collect_location.apply(args=(10.0, 20.0, "X")).get()
+    for observation in created:
+        assert isinstance(observation, EnvironmentalObservation)
+        assert observation.source in {"openweather", "openaq"}
+
+
+def test_collect_satellite_task_persists_canonical_observations(
+    eager_celery, fake_db, monkeypatch
+) -> None:
+    from app.tasks.environmental import collect_satellite
+
+    class FakeSatellite:
+        name = "nasa"
+
+        async def search(self, lat, lon):
+            return ["scene-1"]
+
+        async def retrieve(self, lat, lon, scene_id, location_name=""):
+            return [
+                EnvironmentalObservation(
+                    source="nasa",
+                    variable="temperature",
+                    value=31.2,
+                    unit="celsius",
+                    latitude=lat,
+                    longitude=lon,
+                    dataset="POWER (MERRA-2 reanalysis)",
+                    product="reanalysis-daily-point",
+                    processing_level="L3",
+                    averaging_period="24-hour",
+                    quality="verified",
+                )
+            ]
+
+    import app.services.environmental as env_pkg
+
+    monkeypatch.setattr(
+        env_pkg.ProviderRegistry, "get", staticmethod(lambda n: FakeSatellite())
+    )
+
+    result = collect_satellite.apply(args=(28.6, 77.2, "Delhi")).get()
+    assert result == {
+        "location": "Delhi",
+        "source": "nasa",
+        "ok": True,
+        "observations": 1,
+    }
+
+
+def test_collect_satellite_reports_failure_without_raising(eager_celery, monkeypatch):
+    from app.tasks.environmental import collect_satellite
+
+    class ExplodingProvider:
+        name = "copernicus"
+
+        async def search(self, lat, lon):
+            raise RuntimeError("CDSE unreachable")
+
+    import app.services.environmental as env_pkg
+
+    monkeypatch.setattr(
+        env_pkg.ProviderRegistry, "get", staticmethod(lambda n: ExplodingProvider())
+    )
+
+    class FakeSession:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(env_tasks, "_session", lambda: FakeSession())
+    result = collect_satellite.apply(args=(0.0, 0.0)).get()
+    assert result["ok"] is False
+    assert "CDSE unreachable" in result["error"]
 
 
 def test_collect_all_locations_fans_out_per_location(
@@ -180,41 +268,35 @@ def test_collect_all_locations_fans_out_per_location(
         {"lat": 1.0, "lon": 2.0, "name": "Alpha"},
         {"lat": 3.0, "lon": 4.0, "name": "Beta"},
     ]
-    monkeypatch.setattr(
-        __import__("app.tasks.environmental", fromlist=["x"]),
-        "discover_locations",
-        lambda: custom,
-    )
+    monkeypatch.setattr(env_tasks, "discover_locations", lambda: custom)
 
     created, _ = fake_db
     summary = collect_all_locations.apply().get()
 
-    # Dispatch summary returned to Beat/Flower...
     assert summary["dispatched"] == 2
     assert summary["locations"] == ["Alpha", "Beta"]
-    # ...and in eager mode each fanned-out task actually ran and persisted.
-    names = {d["location_name"] for d in created}
-    assert {"Alpha", "Beta"}.issubset(names)
+    names = {o.location_name for o in created}
+    assert {"Alpha", "Beta"} <= names
 
 
 def test_collect_all_locations_discovers_from_the_database(
     eager_celery, fake_db, monkeypatch
 ) -> None:
-    from app.tasks import environmental as env_mod
-
-    calls = []
+    discovery_calls = []
 
     def fake_discover():
-        calls.append(1)
+        discovery_calls.append(1)
         return [{"lat": 10.0, "lon": 20.0, "name": "DbCity"}]
 
-    monkeypatch.setattr(env_mod, "discover_locations", fake_discover)
-    summary = collect_all = env_mod.collect_all_locations.apply().get()
-    assert calls  # discovery was consulted, not the hardcoded defaults
-    assert collect_all["locations"] == ["DbCity"]
+    monkeypatch.setattr(env_tasks, "discover_locations", fake_discover)
+    from app.tasks.environmental import collect_all_locations
+
+    summary = collect_all_locations.apply().get()
+    assert discovery_calls  # DB discovery consulted, not hardcoded defaults
+    assert summary["locations"] == ["DbCity"]
 
 
-def test_collect_all_locations_defaults_to_the_monitored_set(
+def test_collect_all_locations_defaults_when_table_empty(
     eager_celery, fake_db
 ) -> None:
     """Empty/unavailable monitored_locations table -> platform defaults."""
@@ -226,32 +308,32 @@ def test_collect_all_locations_defaults_to_the_monitored_set(
 
 def test_provider_failure_does_not_abort_the_batch(eager_celery, monkeypatch) -> None:
     """A network error for one source must not lose the other source."""
-    import asyncio
-
-    import app.services.environmental_service as es
-
     recorded: list = []
 
-    class FlakyService:
+    class FlakyIngestion:
         def __init__(self, db):
             self.db = db
 
-        async def fetch_weather(self, lat, lon, name):
+        async def ingest_weather(self, lat, lon, name):
             raise RuntimeError("connection reset")
 
-        async def fetch_air_quality(self, lat, lon, name):
-            return {"location_name": name, "aqi": 10, "source": "openaq"}
-
-        def save_reading(self, data):
-            if "error" not in data:
-                recorded.append(data)
+        async def ingest_air_quality(self, lat, lon, name):
+            obs = EnvironmentalObservation(
+                source="openaq", variable="pm25", value=10.0, unit="ug/m3",
+                latitude=lat, longitude=lon, location_name=name,
+                observed_at=datetime.now(timezone.utc),
+            )
+            recorded.append(obs)
+            return [obs]
 
     class FakeSession:
         def close(self):
             pass
 
-    monkeypatch.setattr(env_tasks, "_session", FakeSession)
-    monkeypatch.setattr(es, "EnvironmentalService", FlakyService)
+    monkeypatch.setattr(env_tasks, "_session", lambda: FakeSession())
+    import app.services.environmental as env_pkg
+
+    monkeypatch.setattr(env_pkg, "EnvironmentalIngestionService", FlakyIngestion)
 
     from app.tasks.environmental import collect_location
 
@@ -262,15 +344,9 @@ def test_provider_failure_does_not_abort_the_batch(eager_celery, monkeypatch) ->
     assert len(recorded) == 1  # only the air-quality reading persisted
 
 
-def test_task_boundary_uses_a_single_event_loop_per_task(eager_celery, fake_db) -> None:
+def test_task_boundary_uses_a_single_event_loop_per_task(eager_celery) -> None:
     """The async boundary is one asyncio.run per task, never per request."""
-    import ast
-    import inspect
-
-    import app.tasks.environmental as mod
-
-    source = inspect.getsource(mod.collect_for_location)
-    tree = ast.parse(source)
+    tree = ast.parse(inspect.getsource(env_tasks.collect_for_location))
     loop_creations = [
         node
         for node in ast.walk(tree)
@@ -278,7 +354,8 @@ def test_task_boundary_uses_a_single_event_loop_per_task(eager_celery, fake_db) 
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "run"
     ]
-    assert len(loop_creations) == 1  # exactly one event loop per task call
+    assert len(loop_creations) == 1
     # ...and it lives in the SYNC wrapper, not inside the async orchestration.
-    async_src = inspect.getsource(mod.collect_for_location_async)
-    assert "asyncio.run" not in async_src
+    assert "asyncio.run" not in inspect.getsource(
+        env_tasks.collect_for_location_async
+    )

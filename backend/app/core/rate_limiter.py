@@ -28,10 +28,13 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_storage_uri() -> str:
-    """Prefer Redis-backed rate limiting; fall back to memory if unreachable.
+    """Prefer Redis-backed rate limiting; behaviour depends on APP_ENV.
 
-    A short timeout keeps app startup fast when Redis is absent. The choice is
-    logged once at import time so misconfiguration is visible in deployment.
+    development/testing : Redis unreachable -> memory fallback (convenient).
+    production          : Redis unreachable -> FAIL STARTUP. With per-process
+                          memory storage, N replicas each grant the full quota
+                          — silently multiplying every limit by N. That is an
+                          unsafe deployment, so we refuse to boot instead.
     """
     redis_url = settings.REDIS_URL
     try:
@@ -41,7 +44,16 @@ def _resolve_storage_uri() -> str:
         client.ping()
         logger.info("Rate limiter using distributed Redis storage: %s", redis_url)
         return redis_url
-    except Exception as exc:  # pragma: no cover - depends on local infra
+    except Exception as exc:
+        if settings.APP_ENV == "production":
+            # Fail closed: an unenforceable rate limiter in a multi-instance
+            # deployment is a security/cost incident waiting to happen.
+            raise RuntimeError(
+                "REDIS_URL is unreachable and APP_ENV=production: refusing to "
+                "start with per-process rate-limit storage (limits would be "
+                f"multiplied by the replica count). Fix Redis connectivity. "
+                f"Underlying error: {exc.__class__.__name__}: {exc}"
+            ) from exc
         logger.warning(
             "Redis unreachable (%s); rate limiter falling back to per-process "
             "memory storage. NOT suitable for multi-instance deployments.",

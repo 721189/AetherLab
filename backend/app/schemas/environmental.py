@@ -94,6 +94,14 @@ class EnvironmentalObservation(BaseModel):
     retrieved_at: Optional[datetime] = Field(
         default=None, description="When we fetched it"
     )
+    averaging_period: str = Field(
+        default="unknown",
+        description=(
+            "Aggregation window of the measurement, e.g. '1-hour', '8-hour', "
+            "'24-hour'. AQI methodology is only valid for the EPA-defined "
+            "window per pollutant; 'unknown' marks instantaneous readings."
+        ),
+    )
     quality_flags: dict = Field(
         default_factory=dict,
         description="Provider-specific quality flags (cloud cover, QA values...)",

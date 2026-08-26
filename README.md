@@ -25,7 +25,7 @@ AetherLab is an **intelligent environmental intelligence platform** that combine
 | **📁 Projects** | Create / list / update / soft-archive projects with strict data isolation between users |
 | **🤖 Agents** | Configure autonomous AI agents per project (model, temperature, system prompt, JSON config, lifecycle status) |
 | **💬 Conversations** | Persistent per-project chat history with an LLM-powered reply flow |
-| **🌍 Environmental** | Provider-adapter ingestion (**OpenAQ v3**, OpenWeather, **NASA POWER** satellite) normalised into a canonical `EnvironmentalObservation` model with full **provenance**; **real EPA-breakpoint AQI**; Redis-cached provider calls; user-owned `monitored_locations`; query latest / historical / geofenced readings; **Celery fan-out ingestion every 15 min** |
+| **🌍 Environmental** | Provider-adapter ingestion via a **ProviderRegistry**: OpenWeather, OpenAQ v3, **NASA POWER meteorology (MERRA-2 reanalysis)** and **Copernicus CDSE / Sentinel-5P NO₂** — all normalised into a canonical `EnvironmentalObservation` model with full **provenance** persisted to an `environmental_observations` table; **real EPA-breakpoint AQI with explicit methodology status**; Redis-cached provider calls; user-owned `monitored_locations`; Celery fan-out ingestion every 15 min |
 | **🛡️ Abuse protection** | **Redis-backed distributed rate limiting** (shared across replicas) + provider response cache so repeat requests never re-hit paid APIs |
 | **🧩 AI Providers** | Pluggable `LLMProvider` abstraction (OpenAI impl) behind a factory. **Free Nemotron model via OpenRouter by default** |
 | **📈 Observability** | **Prometheus metrics** (`/metrics` scrape endpoint) with per-request counts & latency histograms, Sentry error/performance monitoring, JSON structured logging with request-ID correlation |
@@ -369,6 +369,29 @@ Responses include the structured `429` body `{ "detail": "Rate limit exceeded", 
 
 > Tests run with the limiter **disabled** (conftest autouse fixture) so the full 218-test suite never trips a per-IP cap.
 >
+### Scientific-integrity guarantees
+
+Institutional/research consumers can rely on these invariants (all enforced by tests):
+
+- **AQI methodology is explicit and never faked.** Every AQI carries
+  standard=EPA, the pollutant, its averaging period, source-observation
+  count and a methodology_status: standard,
+  
+on_standard_averaging (e.g. computed from instantaneous sensor readings
+  — labelled indicative only), or out_of_standard_range.
+- **No extrapolation.** Concentrations beyond the published EPA breakpoint
+  tables return *no* value rather than an invented one.
+- **EPA truncation rules are encoded** (preprocess_concentration) before
+  breakpoint lookup, never rounded up.
+- **Averaging windows are validated** per pollutant (PM2.5/PM10 24-h, O3/CO
+  8-h, NO2/SO2 1-h); contradictory windows are rejected outright.
+- **Provider terminology is accurate.** NASA POWER is labelled atmospheric
+  reanalysis (MERRA-2), not satellite imagery; Sentinel-5P provenance names
+  dataset, product, processing level and footprint resolution.
+- **Satellite value extraction never fabricates data.** Copernicus retrieval
+  without CDSE processing credentials raises a precise error instead of
+  returning invented numbers.
+
 > **Test tiers** (markers in `pytest.ini`):
 >
 > | Tier | Marker | Runs | Purpose |

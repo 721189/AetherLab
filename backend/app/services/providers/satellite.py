@@ -74,14 +74,26 @@ class SatelliteScene:
 
 
 # ---------------------------------------------------------------------------
-# NASA implementation (POWER API — daily gridded meteorology).
+# NASA POWER — meteorological *reanalysis* data.
+#
+# IMPORTANT TERMINOLOGY: NASA POWER (MERRA-2 atmospheric assimilation) is
+# gridded environmental/meteorological model data — NOT satellite imagery and
+# NOT a Sentinel/Landsat-class EO raster product. It satisfies the
+# SatelliteProvider protocol because it is catalogue-shaped (scene per day),
+# but its provenance must always describe it as reanalysis. True EO imagery
+# belongs to providers like Copernicus (Sentinel-5P).
 # ---------------------------------------------------------------------------
 
 NASA_POWER_URL = "https://power.laarc.nasa.gov/api/temporal/daily/point"
 
 
 class NASAProvider:
-    """NASA POWER daily-point implementation of :class:`SatelliteProvider`."""
+    """NASA POWER daily-point meteorology (MERRA-2 reanalysis).
+
+    Implements :class:`SatelliteProvider` for pipeline uniformity; the
+    provenance on every observation states ``dataset="POWER ..."`` with
+    processing level L3 so no consumer can mistake it for direct imagery.
+    """
 
     name = "nasa"
 
@@ -92,8 +104,8 @@ class NASAProvider:
         "WS2M": ("wind_speed", "m/s", "Wind Speed at 2 Meters"),
     }
 
-    DATASET = "POWER"
-    PRODUCT = "daily-point"
+    DATASET = "POWER (MERRA-2 reanalysis)"
+    PRODUCT = "reanalysis-daily-point"
     PROCESSING_LEVEL = "L3"
     RESOLUTION = "0.5° x 0.625° (~55 km)"
 
