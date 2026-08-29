@@ -49,6 +49,8 @@ class SatelliteScene:
         acquisition_time: datetime,
         footprint: dict | None = None,
         quality_flags: dict | None = None,
+        assets: dict | None = None,
+        collection: str | None = None,
     ):
         self.scene_id = scene_id
         self.source = source
@@ -59,17 +61,22 @@ class SatelliteScene:
         self.acquisition_time = acquisition_time
         self.footprint = footprint or {}
         self.quality_flags = quality_flags or {}
+        # download assets: {name: {"href": url, "title": str, "roles": [..]}}
+        self.assets = assets or {}
+        self.collection = collection or dataset
 
     def to_dict(self) -> dict:
         return {
             "scene_id": self.scene_id,
             "source": self.source,
             "dataset": self.dataset,
+            "collection": self.collection,
             "product": self.product,
             "processing_level": self.processing_level,
             "resolution": self.resolution,
             "acquisition_time": self.acquisition_time.isoformat(),
             "quality_flags": self.quality_flags,
+            "assets": self.assets,
         }
 
 

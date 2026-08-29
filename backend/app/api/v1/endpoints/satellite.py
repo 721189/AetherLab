@@ -27,12 +27,12 @@ router = APIRouter(prefix="/satellite", tags=["Satellite"])
 
 def _provider(source: str):
     try:
-        return ProviderRegistry.get(source)
+        return ProviderRegistry.get_satellite(source)
     except KeyError:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown satellite source {source!r}; "
-            f"available: {ProviderRegistry.names()}",
+            f"available: {ProviderRegistry.satellite_names()}",
         )
 
 

@@ -221,6 +221,26 @@ class ProviderRegistry:
     def names(cls) -> List[str]:
         return ["openweather", "openaq", "nasa", "copernicus"]
 
+    @classmethod
+    def satellite_names(cls) -> List[str]:
+        return ["nasa", "copernicus"]
+
+    @classmethod
+    def get_satellite(cls, name: str):
+        """Look up a satellite provider, rejecting non-satellite sources.
+
+        Point-observation providers (OpenWeather, OpenAQ) implement the
+        ``EnvironmentalProvider`` interface and must never be addressable
+        through the satellite catalogue API. This guard enforces that.
+        """
+        name = name.lower()
+        if name not in cls.satellite_names():
+            raise KeyError(
+                f"Unknown satellite provider {name!r}; "
+                f"available satellite sources: {cls.satellite_names()}"
+            )
+        return cls.get(name)
+
 
 class EnvironmentalIngestionService:
     """Orchestrates every provider into one canonical persistence path."""

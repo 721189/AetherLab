@@ -77,7 +77,7 @@ class TestRetrieveHonesty:
             acquisition_time=datetime(2026, 8, 24, tzinfo=timezone.utc),
         )
         with patch.object(
-            provider, "_get_token", new=AsyncMock(return_value="token")
+            provider, "_ensure_token", new=AsyncMock(return_value="token")
         ), patch.object(provider, "metadata", new=AsyncMock(return_value=scene)):
             with pytest.raises(ProviderError) as exc_info:
                 asyncio.run(provider.retrieve(28.6, 77.2, "a1b2c3"))
