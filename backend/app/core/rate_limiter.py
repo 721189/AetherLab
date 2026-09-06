@@ -70,6 +70,41 @@ limiter = Limiter(
 )
 
 
+def _patch_slowapi_starlette_compat() -> None:
+    """Monkeypatch slowapi's `_inject_headers` to tolerate newer Starlette.
+
+    slowapi 0.1.10's `sync_wrapper` passes the endpoint return value straight to
+    `_inject_headers` on the Limiter class, which hard-fails with
+    `parameter `response` must be an instance of starlette.responses.Response`
+    when Starlette's response object is not an exact `Response` subclass. The
+    rate-limit *decision* (allow/429) is made before this point and is
+    unaffected — only the X-RateLimit-* header injection crashes. This patch
+    defensively skips header injection when the response is not the expected
+    type, preserving the actual rate limiting.
+    """
+    from slowapi.extension import Limiter as _Limiter
+
+    _original_inject = _Limiter._inject_headers  # type: ignore[attr-defined]
+
+    def _safe_inject(response, rate_limit, *args, **kwargs):
+        try:
+            from starlette.responses import Response as _StarletteResponse
+
+            if not isinstance(response, _StarletteResponse):
+                # Not a Response instance (e.g. a dict a sync endpoint returned
+                # that FastAPI will wrap later). Skip header injection but return
+                # the original value so the wrapper chain stays intact.
+                return response
+        except Exception:
+            return response
+        return _original_inject(response, rate_limit, *args, **kwargs)
+
+    _Limiter._inject_headers = _safe_inject  # type: ignore[attr-defined]
+
+
+_patch_slowapi_starlette_compat()
+
+
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """Return a structured 429 response when a limit is exceeded."""
     retry_after = getattr(exc, "retry_after", None)
