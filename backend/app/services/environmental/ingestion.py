@@ -211,6 +211,10 @@ class ProviderRegistry:
                 username=settings.COPERNICUS_USERNAME,
                 password=settings.COPERNICUS_PASSWORD,
             )
+        elif name == "sentinel2":
+            from app.services.providers.sentinel2_provider import Sentinel2Provider
+
+            instance = Sentinel2Provider()
         else:
             raise KeyError(f"Unknown environmental provider {name!r}")
 
@@ -223,7 +227,7 @@ class ProviderRegistry:
 
     @classmethod
     def satellite_names(cls) -> List[str]:
-        return ["nasa", "copernicus"]
+        return ["nasa", "copernicus", "sentinel2"]
 
     @classmethod
     def get_satellite(cls, name: str):

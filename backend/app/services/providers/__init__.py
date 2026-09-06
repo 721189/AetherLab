@@ -9,6 +9,7 @@ from app.services.providers.satellite import (
     SatelliteProvider,
     SatelliteScene,
 )
+from app.services.providers.sentinel2_provider import Sentinel2Provider
 
 __all__ = [
     "EnvironmentalProvider",
@@ -19,4 +20,5 @@ __all__ = [
     "SatelliteProvider",
     "SatelliteScene",
     "NASAProvider",
+    "Sentinel2Provider",
 ]
