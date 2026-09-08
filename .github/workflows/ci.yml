@@ -37,11 +37,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # requirements.txt was generated with `pip freeze > requirements.txt` on
-      # Windows PowerShell, so it is UTF-16 encoded AND contains Windows-only
-      # packages that do not exist on Linux; normalise/filter here. The
-      # committed file stays authoritative for local Windows dev.
-
       - name: Install backend dependencies
         run: pip install --upgrade pip && pip install -r ../requirements.txt
 
