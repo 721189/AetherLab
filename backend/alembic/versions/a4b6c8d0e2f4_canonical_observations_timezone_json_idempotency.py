@@ -28,34 +28,38 @@ JSON_COLUMN = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    is_postgresql = bind.dialect.name == "postgresql"
+
     # 1. Timezone-aware timestamps (stored as UTC).
+    #    SQLite doesn't support ALTER COLUMN at all — column types are
+    #    informational only, so we skip the type change on SQLite. The
+    #    timezone handling is enforced in the SQLAlchemy model layer.
     _tz_columns = {
         "observed_at": "observed_at::timestamp with time zone",
         "acquisition_time": "acquisition_time::timestamp with time zone",
         "retrieved_at": "retrieved_at::timestamp with time zone",
         "created_at": "created_at::timestamp with time zone",
     }
-    for col, using in _tz_columns.items():
-        op.alter_column(
-            "environmental_observations",
-            col,
-            type_=sa.DateTime(timezone=True),
-            postgresql_using=using,
-        )
+    if is_postgresql:
+        for col, using in _tz_columns.items():
+            op.alter_column(
+                "environmental_observations",
+                col,
+                type_=sa.DateTime(timezone=True),
+                postgresql_using=using,
+            )
 
     # 2) JSON-encoded provenance / quality_flags -> native JSON (JSONB on PG).
-    op.alter_column(
-        "environmental_observations",
-        "provenance",
-        type_=JSON_COLUMN,
-        postgresql_using="provenance::jsonb",
-    )
-    op.alter_column(
-        "environmental_observations",
-        "quality_flags",
-        type_=JSON_COLUMN,
-        postgresql_using="quality_flags::jsonb",
-    )
+    #    Same rationale: SQLite ignores column types at storage level.
+    if is_postgresql:
+        for col in ("provenance", "quality_flags"):
+            op.alter_column(
+                "environmental_observations",
+                col,
+                type_=JSON_COLUMN,
+                postgresql_using=f"{col}::jsonb",
+            )
 
     # 3) Idempotency: observation_hash + UNIQUE index.
     op.add_column(
@@ -71,20 +75,27 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    is_postgresql = bind.dialect.name == "postgresql"
+
     op.drop_index(op.f("ix_environmental_observations_observation_hash"),
                   table_name="environmental_observations")
     op.drop_column("environmental_observations", "observation_hash")
 
-    # Revert JSON columns back to plain strings.
-    op.alter_column(
-        "environmental_observations", "quality_flags",
-        type_=sa.String(length=1024),
-    )
-    op.alter_column(
-        "environmental_observations", "provenance",
-        type_=sa.String(length=4096),
-    )
+    # SQLite doesn't support ALTER COLUMN — skip type changes on SQLite.
+    if is_postgresql:
+        # Revert JSON columns back to plain strings (PG needs USING cast).
+        for col, length in (("quality_flags", 1024), ("provenance", 4096)):
+            op.alter_column(
+                "environmental_observations", col,
+                type_=sa.String(length=length),
+                postgresql_using=f"{col}::text",
+            )
 
-    # Revert timestamps to timezone-naive.
-    for col in ("observed_at", "acquisition_time", "retrieved_at", "created_at"):
-        op.alter_column("environmental_observations", col, type_=sa.DateTime())
+        # Revert timestamps to timezone-naive.
+        for col in ("observed_at", "acquisition_time", "retrieved_at", "created_at"):
+            op.alter_column(
+                "environmental_observations", col,
+                type_=sa.DateTime(),
+                postgresql_using=f"{col}::timestamp",
+            )
