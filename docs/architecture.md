@@ -9,7 +9,7 @@ RAW DATA -> NORMALIZATION -> PROVENANCE -> QUALITY/UNCERTAINTY
 
 ## Components
 
-- **Frontend**: Next.js 16 app -> `lib/api/client.ts` -> FastAPI `/api/v1`
+- **Frontend**: Next.js 15 app -> `lib/api/client.ts` -> FastAPI `/api/v1`
 - **API**: FastAPI with JWT auth, rate limiting, pagination
 - **Database**: PostgreSQL (source of truth) + Alembic migrations
 - **Cache**: Redis (provider response cache, rate limits, job coordination)

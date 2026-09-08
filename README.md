@@ -532,7 +532,7 @@ Every push to `main` and every pull request triggers **two independent jobs** (`
 
 | Job | Runner | Steps |
 |-----|--------|-------|
-| **Backend · pytest** | ubuntu + Python 3.12 | Normalise `requirements.txt` for Linux (UTF-16 → UTF-8, drop Windows-only pkgs) → `pip install -r` → `pytest` |
+| **Backend · pytest** | ubuntu + Python 3.12 | `pip install -r requirements.txt` → `pytest` |
 | **Frontend · typecheck + build** | ubuntu + Node 20 | `npm ci` → `tsc --noEmit` → `npm run build` |
 
 The CI step is safe on Windows-authored files: it fixes the PowerShell `pip freeze` encoding and filters Windows-only packages so the Linux runner can install the rest.
