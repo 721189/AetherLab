@@ -50,9 +50,10 @@ class Sentinel2Provider:
     def __init__(self, odata_url: str = CDSE_ODATA_URL):
         self.odata_url = odata_url.rstrip("/")
 
-    def _collect_str(self, start: date, end: date) -> str:
-        """CDSE OData dateCoverage-filter string (start..end)."""
-        return f"{start.isoformat()}T00:00:00.000Z/{end.isoformat()}T23:59:59.999Z"
+    @staticmethod
+    def _odata_datetime(d: date) -> str:
+        """Format a date as an OData datetime literal (UTC)."""
+        return f"{d.isoformat()}T00:00:00.000Z"
 
     async def discover_scenes(
         self,
@@ -79,6 +80,11 @@ class Sentinel2Provider:
         if start > end:
             raise ValueError(f"start ({start}) must be <= end ({end})")
 
+        # OData date range: two separate comparisons (ge start, le end). The
+        # CDSE catalogue expects literal datetime values, NOT a start..end range
+        # string — `ge <range>` is a syntax error against ContentDate/Start.
+        start_lit = self._odata_datetime(start)
+        end_lit = f"{end.isoformat()}T23:59:59.999Z"
         params: Dict[str, Any] = {
             "$filter": (
                 f"Collection/Name eq '{PRODUCT_COLLECTION}' and "
@@ -86,7 +92,10 @@ class Sentinel2Provider:
                 f"POLYGON(({bbox[0]} {bbox[1]},{bbox[2]} {bbox[1]},"
                 f"{bbox[2]} {bbox[3]},{bbox[0]} {bbox[3]},"
                 f"{bbox[0]} {bbox[1]}))') and "
-                f"ContentDate/Start ge {self._collect_str(start, end)}"
+                f"ContentDate/Start ge {start_lit} and "
+                f"ContentDate/Start le {end_lit} and "
+                f"OData.CSC.DoubleAttribute/any(a: a/Name eq 'cloudCoverage' "
+                f"and a/Value le {max_cloud})"
             ),
             "$orderby": "ContentDate/Start desc",
             "$top": min(max_results, 100),
@@ -170,12 +179,16 @@ class Sentinel2Provider:
             end = date.today()
         bbox = [lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1]
         scenes = await self.discover_scenes(bbox, start, end, max_cloud=max_cloud)
-        # Filter again client-side: cloud percentage is only a hint in the
-        # OData query; the authoritative filter happens here so any scene
-        # exceeding the limit is never returned to a caller.
+        # Filter again client-side: the OData query hint is authoritative for
+        # scenes that carry cloud metadata. Scenes with UNKNOWN cloud cover
+        # (missing metadata) are treated conservatively and EXCLUDED — assuming
+        # 0% cloud when the catalogue doesn't say so would silently return
+        # unusable scenes. Callers that want everything can inspect scenes
+        # before calling search().
         return [
             s for s in scenes
-            if (s.quality_flags.get("cloud_cover") or 0) <= max_cloud
+            if s.quality_flags.get("cloud_cover") is not None
+            and s.quality_flags["cloud_cover"] <= max_cloud
         ]
 
     async def metadata(self, scene_id: str) -> SatelliteScene:

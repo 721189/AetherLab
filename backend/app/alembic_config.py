@@ -29,7 +29,12 @@ def _resolve_config() -> Config:
         os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
 
     cfg = Config(_ALEMBIC_INI)
-    cfg.set_main_option("script_location", "alembic")
+    # Use an absolute path so migrations resolve correctly regardless of
+    # the caller's CWD (tests run from the repo root, not from backend/).
+    cfg.set_main_option(
+        "script_location",
+        os.path.join(os.path.dirname(_ALEMBIC_INI), "alembic"),
+    )
     return cfg
 
 

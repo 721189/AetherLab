@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 from typing import Iterator, List, Optional
 
 from app.ai.factory import get_llm_provider
@@ -95,7 +95,7 @@ class ConversationService:
         conv = self.conv_repo.get_by_id(conv_id, owner_id)
         if not conv:
             return False
-        return self.msg_repo.archive(message_id)
+        return self.msg_repo.archive(message_id, conv_id, owner_id)
 
     def _resolve_llm_config(
         self,
@@ -211,10 +211,10 @@ class ConversationService:
         )
 
         # Save the user message.
-        user_msg = self.msg_repo.create(conv_id, "user", content)
+        user_msg = self.msg_repo.create(conv_id, "user", content, owner_id)
 
         # Build the history to send to the LLM.
-        history = self.msg_repo.get_all_by_conversation(conv_id, limit=50)
+        history = self.msg_repo.get_all_by_conversation(conv_id, owner_id, limit=50)
         messages = [{"role": m.role, "content": m.content} for m in history]
 
         # Call the configured LLM provider with the resolved agent config.
@@ -227,7 +227,7 @@ class ConversationService:
         )
 
         # Persist the assistant reply.
-        assistant_msg = self.msg_repo.create(conv_id, "assistant", response_text)
+        assistant_msg = self.msg_repo.create(conv_id, "assistant", response_text, owner_id)
 
         # Bump the conversation timestamp.
         conv.updated_at = datetime.now(timezone.utc)
@@ -257,8 +257,8 @@ class ConversationService:
         conv = self.conv_repo.get_by_id(conv_id, owner_id)
         if not conv:
             return None
-        msgs = self.msg_repo.get_all_by_conversation(conv_id, skip, limit)
-        total = self.msg_repo.count_by_conversation(conv_id)
+        msgs = self.msg_repo.get_all_by_conversation(conv_id, owner_id, skip=skip, limit=limit)
+        total = self.msg_repo.count_by_conversation(conv_id, owner_id)
         data = [MessageResponse.model_validate(m) for m in msgs]
 
         base = f"/api/v1/projects/{conv.project_id}/conversations/{conv_id}/messages"
@@ -297,11 +297,11 @@ class ConversationService:
 
         # Persist the user message immediately so it is part of the history
         # the provider receives.
-        self.msg_repo.create(conv_id, "user", content)
+        self.msg_repo.create(conv_id, "user", content, owner_id)
 
         # Build the history (now includes the user message) bounded to a sane
         # window so large conversations don't blow past token limits.
-        history = self.msg_repo.get_all_by_conversation(conv_id, limit=50)
+        history = self.msg_repo.get_all_by_conversation(conv_id, owner_id, limit=50)
         messages = [{"role": m.role, "content": m.content} for m in history]
 
         def _inner() -> Iterator[str]:
@@ -323,7 +323,7 @@ class ConversationService:
                 # best-effort) so the conversation history stays consistent.
                 text = "".join(collected)
                 if text:
-                    self.msg_repo.create(conv_id, "assistant", text)
+                    self.msg_repo.create(conv_id, "assistant", text, owner_id)
                     conv = self.conv_repo.get_by_id(conv_id, owner_id)
                     if conv:
                         conv.updated_at = datetime.now(timezone.utc)
