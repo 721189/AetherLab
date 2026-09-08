@@ -41,24 +41,6 @@ jobs:
       # Windows PowerShell, so it is UTF-16 encoded AND contains Windows-only
       # packages that do not exist on Linux; normalise/filter here. The
       # committed file stays authoritative for local Windows dev.
-      - name: Normalise requirements.txt for Linux CI (UTF-16 -> UTF-8, drop Windows-only)
-        working-directory: ./
-        run: |
-          python - <<'PY'
-          import pathlib, re
-          req = pathlib.Path("requirements.txt")
-          raw = req.read_bytes()
-          text = raw.decode("utf-16") if b"\x00" in raw else raw.decode("utf-8")
-          drop_prefix = re.compile(
-              r"^\s*(pywin32|pypiwin32|pywin32-setctime|wincertstore|winshell|windows-curses)[\w.\-]*\s*==",
-              re.IGNORECASE,
-          )
-          lines = [
-              ln for ln in text.splitlines()
-              if ln.strip() and not drop_prefix.match(ln)
-          ]
-          req.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          PY
 
       - name: Install backend dependencies
         run: pip install --upgrade pip && pip install -r ../requirements.txt
@@ -111,25 +93,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Normalise requirements.txt for Linux CI (UTF-16 -> UTF-8, drop Windows-only)
-        working-directory: ./
-        run: |
-          python - <<'PY'
-          import pathlib, re
-          req = pathlib.Path("requirements.txt")
-          raw = req.read_bytes()
-          text = raw.decode("utf-16") if b"\x00" in raw else raw.decode("utf-8")
-          drop_prefix = re.compile(
-              r"^\s*(pywin32|pypiwin32|pywin32-setctime|wincertstore|winshell|windows-curses)[\w.\-]*\s*==",
-              re.IGNORECASE,
-          )
-          lines = [
-              ln for ln in text.splitlines()
-              if ln.strip() and not drop_prefix.match(ln)
-          ]
-          req.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          PY
 
       - name: Install backend dependencies
         run: pip install --upgrade pip && pip install -r ../requirements.txt
