@@ -55,7 +55,8 @@ backend/_op.txt
 backend/_rt.txt
 frontend/_fb.txt
 frontend/_dev_err.txt
-git_check.txt# Diagnostic / probe artifacts from local debugging sessions.
+git_check.txt
+# Diagnostic / probe artifacts from local debugging sessions.
 _*.txt
 _*.log
 _*.err

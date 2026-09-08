@@ -1,6 +1,7 @@
 # Continuous Integration for AetherLab.
 #
-# Runs on every push to `main` and on every pull request. Three tiers:
+# Runs on every push to `main` (releases), `development`, and `release/*`
+# branches, and on every pull request.
 #
 #   backend-unit      FastAPI suite on SQLite (hermetic, every push)
 #   backend-postgres  Integration tier against REAL PostgreSQL + Redis
@@ -127,6 +128,9 @@ jobs:
 
       - name: Type-check
         run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
 
       - name: Production build
         env:

@@ -21,19 +21,7 @@ RUN apt-get update \
 
 COPY requirements.txt .
 
-# Normalise the Windows-authored lockfile (UTF-16 -> UTF-8) and drop
-# Windows-only packages, mirroring what CI does on Linux runners.
-RUN python - <<'PY'
-import pathlib
-
-raw = pathlib.Path("requirements.txt").read_bytes()
-text = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8")
-skip = ("win32_setctime", "colorama", "pywin32")
-lines = [l for l in text.splitlines() if l.strip() and not l.lower().startswith(skip)]
-pathlib.Path("requirements.linux.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-PY
-
-RUN pip wheel --wheel-dir /wheels -r requirements.linux.txt
+RUN pip wheel --wheel-dir /wheels -r requirements.txt
 
 
 # ------------------------------- runtime -----------------------------------
@@ -55,17 +43,7 @@ RUN apt-get update \
 COPY --from=builder /wheels /wheels
 COPY requirements.txt .
 
-RUN python - <<'PY'
-import pathlib
-
-raw = pathlib.Path("requirements.txt").read_bytes()
-text = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8")
-skip = ("win32_setctime", "colorama", "pywin32")
-lines = [l for l in text.splitlines() if l.strip() and not l.lower().startswith(skip)]
-pathlib.Path("requirements.linux.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-PY
-
-RUN pip install --no-cache-dir --find-links=/wheels -r requirements.linux.txt \
+RUN pip install --no-cache-dir --find-links=/wheels -r requirements.txt \
     && rm -rf /wheels
 
 # Application code + Alembic migrations ship with the image.

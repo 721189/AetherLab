@@ -528,14 +528,14 @@ Tests use an **in-memory SQLite** database and a **mocked LLM provider** — fas
 
 ## ⚙️ CI/CD (GitHub Actions)
 
-Every push to `main` and every pull request triggers **two independent jobs** (`.github/workflows/ci.yml`):
+Every push to `main`, `development`, `release/*`, and every pull request triggers **three independent jobs** (`.github/workflows/ci.yml`):
 
 | Job | Runner | Steps |
 |-----|--------|-------|
 | **Backend · pytest** | ubuntu + Python 3.12 | `pip install -r requirements.txt` → `pytest` |
-| **Frontend · typecheck + build** | ubuntu + Node 20 | `npm ci` → `tsc --noEmit` → `npm run build` |
+| **Frontend · typecheck + build** | ubuntu + Node 20 | `npm ci` → `tsc --noEmit` → `eslint .` → `npm run build` |
 
-The CI step is safe on Windows-authored files: it fixes the PowerShell `pip freeze` encoding and filters Windows-only packages so the Linux runner can install the rest.
+`requirements.txt` is canonicalized UTF-8.
 
 ---
 
