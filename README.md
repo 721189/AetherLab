@@ -80,6 +80,7 @@ The system uses a **defense-in-depth, layered backend** with a separate frontend
 | ORM | [SQLAlchemy 2.x](https://www.sqlalchemy.org/) | Typed, declarative model layer |
 | Migrations | [Alembic](https://alembic.sqlalchemy.org/) | Versioned schema evolution |
 | Database | [PostgreSQL 17](https://www.postgresql.org/) | Primary store |
+| Object storage | S3-compatible (configurable) | Satellite rasters / GeoTIFF / NetCDF (see `docs/storage.md`) |
 | Auth | [python-jose](https://python-jose.readthedocs.io/) + [passlib/bcrypt](https://passlib.readthedocs.io/) | JWT + password hashing |
 | Rate limiting | [slowapi](https://github.com/laurentS/slowapi) | Per-endpoint in-memory limits |
 | Task queue | [Celery](https://docs.celeryq.dev/) | Optional scheduled environmental ingestion |
@@ -427,7 +428,11 @@ on_standard_averaging (e.g. computed from instantaneous sensor readings
 > |------|--------|------|---------|
 > | Unit / API | *(default)* | every push | Hermetic SQLite + mocked providers |
 > | Integration | `-m integration` | needs `TEST_DATABASE_URL` | Real PostgreSQL: migrations, constraints, cascades, token rotation |
-> | Provider smoke | `-m smoke` | opt-in `RUN_PROVIDER_SMOKE=1` | Live OpenWeather/OpenAQ/NASA contract checks (consumes quota) |
+> | Provider smoke | `-m smoke` | opt-in `RUN_PROVIDER_SMOKE=1` | Live OpenWeather/OpenAQ/NASA/CDSE/Sentinel-2/LLM contract checks (consumes quota) |
+>
+> A **nightly provider-smoke workflow** (`.github/workflows/provider-smoke.yml`)
+> runs the smoke tier against the real providers every night so that
+> provider-side schema drift is caught even when no code changed.
 
 
 ---

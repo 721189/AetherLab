@@ -69,6 +69,16 @@ class Settings(BaseSettings):
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0
     SENTRY_SEND_DEFAULT_PII: bool = False
 
+    # Object storage for satellite products / large rasters (S3-compatible).
+    # PostgreSQL holds metadata + provenance + results; the object store holds
+    # GeoTIFF/NetCDF assets. Empty values disable object storage entirely.
+    OBJECT_STORE_ENDPOINT: str = ""
+    OBJECT_STORE_BUCKET: str = ""
+    OBJECT_STORE_ACCESS_KEY: str = ""
+    OBJECT_STORE_SECRET_KEY: str = ""
+    OBJECT_STORE_REGION: str = ""
+    OBJECT_STORE_SECURE: bool = True
+
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
         case_sensitive=True,

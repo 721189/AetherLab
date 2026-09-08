@@ -1,0 +1,82 @@
+# Continuous provider contract validation (nightly).
+#
+# The main CI (ci.yml) runs the hermetic unit suite on every push and the
+# opt-in live provider smoke tests are deliberately NOT run there (they consume
+# external API quota). But provider-side contract drift is invisible to mocks:
+# OpenAQ can rename a field, CDSE can retire an endpoint, NASA can change a
+# data shape — while all 346 local tests stay green.
+#
+# This workflow therefore runs the live smoke tier (`pytest -m smoke`) once a
+# night against the REAL providers:
+#
+#   OpenAQ v3         (needs OPENAQ_API_KEY)          — skipped if absent
+#   OpenWeather       (needs OPENWEATHER_API_KEY)     — skipped if absent
+#   NASA POWER        (public, keyless)               — always runs
+#   Copernicus CDSE   (catalogue search is public)    — always runs
+#   Sentinel-2 CDSE   (catalogue discovery is public) — always runs
+#   LLM (OpenRouter/OpenAI)                           — skipped if key absent
+#
+# A failed nightly run means a provider changed underneath AetherLab — that is
+# the exact class of incident this exists to catch.
+#
+# Configure secrets in the repo Settings -> Secrets -> Actions:
+#   OPENAQ_API_KEY, OPENWEATHER_API_KEY,
+#   COPERNICUS_USERNAME, COPERNICUS_PASSWORD,
+#   OPENROUTER_API_KEY, OPENAI_API_KEY
+
+name: Provider Smoke (nightly)
+
+on:
+  schedule:
+    # 03:23 UTC every night — quiet hours, after any daily provider-side
+    # deployments have settled, before EU/US morning traffic peaks.
+    - cron: "23 3 * * *"
+  workflow_dispatch: # allow manual "run now" for troubleshooting
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-smoke-nightly
+  cancel-in-progress: false # never cancel an in-flight provider run midway
+
+jobs:
+  provider-smoke:
+    name: Live provider contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --upgrade pip && pip install -r ../requirements.txt
+
+      - name: Run live provider smoke suite
+        working-directory: backend
+        env:
+          APP_ENV: testing
+          RUN_PROVIDER_SMOKE: "1"
+          OPENAQ_API_KEY: ${{ secrets.OPENAQ_API_KEY }}
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
+          COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python -m pytest tests/test_smoke_providers.py -v -s
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-smoke-failure
+          path: backend/pytest-reports/
+          retention-days: 14
+          if-no-files-found: ignore

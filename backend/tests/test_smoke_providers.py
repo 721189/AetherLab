@@ -78,3 +78,106 @@ class TestNASALive:
         assert observations
         temp = next(o for o in observations if o.variable == "temperature")
         assert -50 < temp.value < 60  # sanity band for surface air temperature
+
+
+class TestCopernicusLive:
+    """Copernicus CDSE catalogue search is public (no credentials required).
+
+    Only catalogue search/metadata are exercised here — value extraction from
+    NetCDF products requires CDSE openEO/Processing credentials and is
+    deliberately NOT attempted (it would silently fail or fabricate).
+    """
+
+    def test_catalogue_search_reachable_and_schema_stable(self):
+        import asyncio
+        from datetime import date, timedelta
+
+        from app.services.providers.copernicus_provider import CopernicusProvider
+
+        scenes = asyncio.run(
+            CopernicusProvider().search(
+                lat=28.6139,
+                lon=77.2090,
+                start=date.today() - timedelta(days=7),
+                end=date.today(),
+                max_records=3,
+            )
+        )
+        # The catalogue should be reachable and return scene entries (can be
+        # empty for extreme windows, but a recent week over Delhi should
+        # normally have TROPOMI passes).
+        assert isinstance(scenes, list)
+        for scene in scenes:
+            assert scene.scene_id
+            assert scene.source == "copernicus"
+
+
+class TestSentinel2Live:
+    """Sentinel-2 CDSE OData catalogue discovery is public (no credentials).
+
+    Only scene discovery is exercised — NDVI extraction requires local B04/B08
+    band files and is deliberately NOT attempted (the provider refuses to
+    fabricate NDVI).
+    """
+
+    def test_discover_scenes_reachable_and_schema_stable(self):
+        import asyncio
+        from datetime import date, timedelta
+
+        from app.services.providers.sentinel2_provider import Sentinel2Provider
+
+        scenes = asyncio.run(
+            Sentinel2Provider().discover_scenes(
+                bbox=[77.0, 28.5, 77.5, 29.0],  # Delhi area
+                start=date.today() - timedelta(days=7),
+                end=date.today(),
+                max_cloud=50,
+                max_results=3,
+            )
+        )
+        assert isinstance(scenes, list)
+        for scene in scenes:
+            assert scene.scene_id
+            assert scene.source == "sentinel2"
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")),
+    reason="No LLM API key configured (set OPENROUTER_API_KEY or OPENAI_API_KEY)",
+)
+class TestLLMLive:
+    """Live LLM provider roundtrip (opt-in; consumes tokens).
+
+    Verifies the configured provider can be reached and returns a non-empty
+    grounded response — catches model deprecation / auth / base-URL drift.
+    """
+
+    def test_openrouter_roundtrip(self):
+        import os
+
+        from app.ai.providers.openrouter import OpenRouterProvider
+
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            pytest.skip("OPENROUTER_API_KEY not configured")
+
+        provider = OpenRouterProvider(api_key=os.environ["OPENROUTER_API_KEY"])
+        reply = provider.generate_response(
+            [{"role": "user", "content": "Reply with exactly one word: OK"}],
+            max_tokens=8,
+        )
+        assert reply and isinstance(reply, str)
+
+    def test_openai_roundtrip(self):
+        import os
+
+        from app.ai.providers.openai import OpenAIProvider
+
+        if not os.environ.get("OPENAI_API_KEY"):
+            pytest.skip("OPENAI_API_KEY not configured")
+
+        provider = OpenAIProvider(api_key=os.environ["OPENAI_API_KEY"])
+        reply = provider.generate_response(
+            [{"role": "user", "content": "Reply with exactly one word: OK"}],
+            max_tokens=8,
+        )
+        assert reply and isinstance(reply, str)

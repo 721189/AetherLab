@@ -16,6 +16,12 @@ RAW DATA -> NORMALIZATION -> PROVENANCE -> QUALITY/UNCERTAINTY
 - **Workers**: Celery + beat for scheduled ingestion
 - **Providers**: OpenWeather, OpenAQ v3, NASA POWER, Copernicus CDSE, Sentinel-2
 - **Intelligence**: EvidenceBuilder -> EvidenceSet -> grounded LLM answer
+- **Storage**: PostgreSQL (metadata, provenance, results, hashes) + S3-compatible object store (GeoTIFF/NetCDF rasters). See `docs/storage.md`.
+
+## Operations
+
+- **CI** (`.github/workflows/ci.yml`): hermetic unit suite on every push to `main`/`development`/`release/*`, plus an integration tier against real PostgreSQL + Redis.
+- **Provider smoke** (`.github/workflows/provider-smoke.yml`): nightly live contract tests against OpenAQ, OpenWeather, NASA, CDSE, Sentinel-2, and the LLM provider — catches provider-side schema drift that mocks cannot see. Opt-in via `RUN_PROVIDER_SMOKE=1`.
 
 ## Key invariants
 
