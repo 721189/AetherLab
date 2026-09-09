@@ -8,6 +8,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00?logo=sqlalchemy)](https://www.sqlalchemy.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![CI](https://github.com/721189/AetherLab/actions/workflows/ci.yml/badge.svg?branch=aetherlab-integration)](https://github.com/721189/AetherLab/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/Tests-295%20passing-2ea44f)]()
 [![License](https://img.shields.io/badge/License-View%20LICENSE-blue)](/LICENSE)
 
@@ -25,7 +26,7 @@ AetherLab is an **environmental intelligence platform** that combines **geospati
 | **📁 Projects** | Create / list / update / soft-archive projects with strict data isolation between users |
 | **🤖 Agents** | Configure autonomous AI agents per project (model, temperature, system prompt, JSON config, lifecycle status) |
 | **💬 Conversations** | Persistent per-project chat history with an LLM-powered reply flow |
-| **🌍 Environmental** | Provider-adapter ingestion via a **ProviderRegistry**: OpenWeather, OpenAQ v3, **NASA POWER meteorology (MERRA-2 reanalysis)** and **Copernicus CDSE / Sentinel-5P NO₂** — all normalised into a canonical `EnvironmentalObservation` model with full **provenance** persisted to an `environmental_observations` table (timestamps stored timezone-aware in **UTC**; **batch-atomic** commits — no partial batches; **idempotent** via a SHA-256 `observation_hash` UNIQUE key so retries never duplicate); **real EPA-breakpoint AQI with explicit methodology status**; Redis-cached provider calls; user-owned `monitored_locations`; Celery fan-out ingestion every 15 min |
+| **🌍 Environmental** | Provider-adapter ingestion via a **ProviderRegistry**: OpenWeather, OpenAQ v3, **NASA POWER meteorology (MERRA-2 reanalysis)** and **Copernicus CDSE / Sentinel-5P NO₂** — all normalised into a canonical `EnvironmentalObservation` model with full **provenance** persisted to an `environmental_observations` table (timestamps stored timezone-aware in **UTC**; **batch-atomic** commits — no partial batches; **idempotent** via a SHA-256 `observation_hash` UNIQUE key so retries never duplicate); **real EPA-breakpoint AQI with explicit methodology status**; Redis-cached provider calls; user-owned `monitored_locations`; Celery fan-out ingestion every 15 min. See `docs/science/provenance.md` for the full provenance model. |
 | **🛡️ Abuse protection** | **Redis-backed distributed rate limiting** (shared across replicas) + provider response cache so repeat requests never re-hit paid APIs |
 | **🧠 Environmental Intelligence** | Evidence layer between stored observations and the LLM: deterministic query planner → retrieval → aggregation → `EvidenceSet` (observations, derived metrics, source references, uncertainty) → grounded answer with citations |
 | **🧩 AI Providers** | Pluggable `LLMProvider` abstraction behind a factory. **Free Nemotron model via OpenRouter by default**; the assistant is evidence-grounded via the intelligence layer above |
@@ -683,6 +684,24 @@ docker run -p 3000:3000 aetherlab-frontend
 `.dockerignore` excludes `node_modules`, `.next`, `.env*`, and build noise so the container is clean and secret-free.
 
 ---
+## 🚀 Deployment
+
+AetherLab uses a **staged deployment** pipeline: `aetherlab-integration` → `release/*` → `main` (production). Every promotion requires CI green on the **exact commit SHA**, migrations rehearsed, and backup/restore tested.
+
+| Document | Purpose |
+|----------|---------|
+| [`docs/deployment/staged-deployment.md`](docs/deployment/staged-deployment.md) | Full promotion chain, gates, and rollback procedure |
+| [`docs/deployment/ci-verification.md`](docs/deployment/ci-verification.md) | How to run CI against an exact SHA for promotion gating |
+| [`docs/operations/backup-restore.md`](docs/operations/backup-restore.md) | Backup/restore testing cadence and tooling |
+
+**Key invariants:**
+- `aetherlab-integration` is the active development branch — all PRs target it.
+- `main` is production-only — receives merges from `release/*`, never direct pushes.
+- Staging behaves like production for safety checks (no demo-city fallback, no memory rate-limiter fallback, Flower always behind basic-auth).
+- See [`docs/architecture.md`](docs/architecture.md) for the full branch strategy.
+
+---
+
 ## 🖥️ Frontend Application
 
 The **Next.js 15** frontend (TypeScript, App Router, Tailwind + Radix UI) delivers the full product experience.

@@ -116,23 +116,46 @@ class OpenAQProvider(EnvironmentalProvider):
                     latitude=lat,
                     longitude=lon,
                     location_name=location_name,
+                    # --- Timestamp semantics ------------------------------------
+                    # observed_at = when the sensor recorded the measurement
+                    # acquisition_time = same as observed (direct sensor reading,
+                    #   no separate satellite overpass)
+                    # retrieved_at = when we fetched it (audit trail)
                     observed_at=observed,
+                    acquisition_time=observed,
                     retrieved_at=now,
-                    averaging_period="unknown",  # instantaneous sensor reading
-                    provenance={
-                        "provider": "openaq",
-                        "collection": "openaq-v3",
-                        "site_id": site_id,
-                        "sensor_id": sensor_id,
-                        "api_version": "v3",
-                        "retrieved_at": now.isoformat(),
-                    },
+                    # --- Provenance: unambiguous source attribution -------------
+                    dataset="OpenAQ v3",
+                    product="latest",
+                    processing_level="L2",  # processed sensor data
+                    resolution="point",      # station-level reading
+                    averaging_period="instantaneous",  # instantaneous sensor reading
+                    # OpenAQ does not publish per-reading uncertainty;
+                    # None signals "unknown" rather than "zero".
+                    uncertainty=None,
                     confidence=0.85,     # verified station, instantaneous sample
                     quality_score=85.0,
                     data_completeness=len(sensor_params) and (
                         len(readings) / max(len(sensor_params), 1)
                     ),
                     quality="verified",
+                    # Immutable reproducibility bundle.
+                    provenance={
+                        "provider": "openaq",
+                        "collection": "openaq-v3",
+                        "api_version": "v3",
+                        "site_id": site_id,
+                        "site_name": site.get("name"),
+                        "sensor_id": sensor_id,
+                        "parameter": parameter,
+                        "units": unit,
+                        "radius_m": self.radius_m,
+                        "retrieved_at": now.isoformat(),
+                    },
+                    quality_flags={
+                        "is_mobile": site.get("isMobile"),
+                        "is_analysis": reading.get("isAnalysis"),
+                    },
                 )
             )
         if not observations:

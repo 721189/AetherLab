@@ -65,12 +65,46 @@ class OpenWeatherProvider(EnvironmentalProvider):
                     latitude=lat,
                     longitude=lon,
                     location_name=location_name,
+                    # --- Timestamp semantics ------------------------------------
+                    # observed_at = when the measurement was taken by the provider
+                    # acquisition_time = same as observed for current-weather (no
+                    #   separate satellite overpass — this is a direct reading)
+                    # retrieved_at = when we fetched it (provenance audit trail)
                     observed_at=observed,
+                    acquisition_time=observed,
                     retrieved_at=now,
+                    # --- Provenance: unambiguous source attribution -------------
+                    dataset="OpenWeather Current Weather API",
+                    product="current",
+                    processing_level="L2",  # processed product (not raw instrument)
+                    resolution="point",      # station / grid-point reading
+                    averaging_period="instantaneous",  # current weather, not averaged
+                    # OpenWeather does not publish per-variable uncertainty;
+                    # None signals "unknown" rather than "zero" (which would be
+                    # a false precision claim).
+                    uncertainty=None,
                     confidence=0.9,       # official provider, verified account
                     quality_score=90.0,
                     data_completeness=len(variables) / (len(variables) + 1),
                     quality="verified",
+                    # Immutable reproducibility bundle: enough to re-fetch the
+                    # exact same payload from the provider.
+                    provenance={
+                        "provider": "openweather",
+                        "collection": "openweather-current",
+                        "api_version": "2.5",
+                        "endpoint": OPENWEATHER_URL,
+                        "station_id": data.get("id"),
+                        "station_name": data.get("name"),
+                        "raw_dt": data.get("dt"),
+                        "timezone_offset_sec": data.get("timezone"),
+                        "retrieved_at": now.isoformat(),
+                    },
+                    quality_flags={
+                        "clouds_pct": data.get("clouds", {}).get("all"),
+                        "visibility_m": data.get("visibility"),
+                        "weather_id": data.get("weather", [{}])[0].get("id") if data.get("weather") else None,
+                    },
                 )
             )
         return observations
