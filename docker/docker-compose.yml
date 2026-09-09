@@ -113,7 +113,12 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     restart: unless-stopped
-    command: celery -A app.tasks.celery_app flower --port=5555
+    # Flower exposes Celery task control (revoke / retry / rate-limit), so it
+    # is ALWAYS started behind HTTP basic auth. Credentials come from
+    # FLOWER_USER / FLOWER_PASSWORD in ../.env (see .env.example). The port is
+    # published for local development; in staging/production put Flower behind
+    # the reverse proxy / VPN and never expose 5555 to the public internet.
+    command: celery -A app.tasks.celery_app flower --port=5555 --basic_auth=$${FLOWER_USER:-admin}:$${FLOWER_PASSWORD:?FLOWER_PASSWORD is required}
     env_file:
       - ../.env
     environment:

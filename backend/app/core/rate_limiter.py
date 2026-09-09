@@ -31,10 +31,12 @@ def _resolve_storage_uri() -> str:
     """Prefer Redis-backed rate limiting; behaviour depends on APP_ENV.
 
     development/testing : Redis unreachable -> memory fallback (convenient).
-    production          : Redis unreachable -> FAIL STARTUP. With per-process
+    staging/production  : Redis unreachable -> FAIL STARTUP. With per-process
                           memory storage, N replicas each grant the full quota
                           — silently multiplying every limit by N. That is an
                           unsafe deployment, so we refuse to boot instead.
+                          Staging mirrors production here deliberately: a
+                          staging rehearsal must prove the real limiter works.
     """
     redis_url = settings.REDIS_URL
     try:
@@ -45,9 +47,10 @@ def _resolve_storage_uri() -> str:
         logger.info("Rate limiter using distributed Redis storage: %s", redis_url)
         return redis_url
     except Exception as exc:
-        if settings.APP_ENV == "production":
+        if settings.APP_ENV in ("staging", "production"):
             # Fail closed: an unenforceable rate limiter in a multi-instance
             # deployment is a security/cost incident waiting to happen.
+            # Staging is included so rehearsals prove the real limiter.
             raise RuntimeError(
                 "REDIS_URL is unreachable and APP_ENV=production: refusing to "
                 "start with per-process rate-limit storage (limits would be "

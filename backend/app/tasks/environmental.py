@@ -214,12 +214,12 @@ def discover_locations() -> List[Dict[str, Any]]:
         rows = MonitoredLocationRepository(db).get_enabled()
         if not rows:
             # FAIL CLOSED: an empty monitored-locations table must NEVER
-            # silently become five demo cities — especially in production,
+            # silently become five demo cities — in staging or production,
             # where that would mask a data-loss incident as "successful"
             # collection. Operators must explicitly seed locations.
-            if settings.APP_ENV == "production":
+            if settings.APP_ENV in ("staging", "production"):
                 raise RuntimeError(
-                    "No monitored locations configured and APP_ENV=production; "
+                    f"No monitored locations configured and APP_ENV={settings.APP_ENV}; "
                     "refusing to silently fall back to default cities. Seed "
                     "monitored_locations before enabling collection."
                 )
@@ -239,10 +239,10 @@ def discover_locations() -> List[Dict[str, Any]]:
             for r in rows
         ]
     except Exception as exc:
-        if settings.APP_ENV == "production":
+        if settings.APP_ENV in ("staging", "production"):
             # Fail loud: an outage must look like an outage.
             raise RuntimeError(
-                "Could not read monitored_locations and APP_ENV=production; "
+                f"Could not read monitored_locations and APP_ENV={settings.APP_ENV}; "
                 f"refusing to silently fall back to default cities. {exc}"
             ) from exc
         logger.warning("Could not read monitored locations (%s); using defaults", exc)

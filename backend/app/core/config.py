@@ -8,6 +8,7 @@ BASE_DIR = Path(__file__).resolve().parents[3]
 ENV_FILES = {
     "development": ".env",
     "testing": ".env.testing",
+    "staging": ".env.staging",
     "production": ".env.production",
 }
 
@@ -58,6 +59,15 @@ class Settings(BaseSettings):
     # Leave empty to use the provider's built-in fallback (e.g. gpt-4o-mini).
     LLM_FALLBACK_MODEL: str = ""
 
+    # ----------------------------------------------------------------------------
+    # FLOWER (Celery monitor) -- basic-auth credentials. Flower exposes task
+    # control (revoke/retry/rate-limit); unauthenticated Flower in staging or
+    # production is a remote job-control endpoint. The compose file passes these
+    # through so `flower --basic_auth=user:pass` is always enforced.
+    # ----------------------------------------------------------------------------
+    FLOWER_USER: str = "admin"
+    FLOWER_PASSWORD: str = ""
+
     # Optional CORS / server configuration.
     CORS_ORIGINS: list[str] = []
 
@@ -78,6 +88,12 @@ class Settings(BaseSettings):
     OBJECT_STORE_SECRET_KEY: str = ""
     OBJECT_STORE_REGION: str = ""
     OBJECT_STORE_SECURE: bool = True
+
+    # Flower (Celery monitor) basic-auth credentials. Flower exposes task
+    # control (revoke/retry/rate-limit); the compose file enforces
+    # --basic_auth from these values so Flower is never unauthenticated.
+    FLOWER_USER: str = "admin"
+    FLOWER_PASSWORD: str = ""
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

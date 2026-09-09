@@ -1,7 +1,10 @@
 # Continuous Integration for AetherLab.
 #
-# Runs on every push to `main` (releases), `development`, and `release/*`
-# branches, and on every pull request.
+# Runs on every push to `main` (releases), `development`, `aetherlab-integration`
+# and `release/*` branches, and on every pull request.
+# `workflow_dispatch` allows manually running the exact CI matrix against any
+# ref — including an arbitrary commit SHA such as f8ed45f — by entering the
+# ref in the "Use workflow from" picker on the Actions tab.
 #
 #   backend-unit      FastAPI suite on SQLite (hermetic, every push)
 #   backend-postgres  Integration tier against REAL PostgreSQL + Redis
@@ -14,8 +17,9 @@ name: CI
 
 on:
   push:
-    branches: ["main", "development", "release/*"]
+    branches: ["main", "development", "aetherlab-integration", "release/*"]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
