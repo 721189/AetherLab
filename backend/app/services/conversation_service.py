@@ -182,9 +182,18 @@ class ConversationService:
             import logging
 
             logging.getLogger(__name__).exception(
-                "Evidence grounding failed; falling back to plain prompt"
+                "Evidence grounding failed; refusing to answer ungrounded"
             )
-            return system_prompt
+            # FAIL CLOSED: never fall back to an ungrounded prompt for
+            # environmental questions. If evidence retrieval fails, tell the
+            # model to say so explicitly rather than hallucinate values.
+            return (
+                f"{system_prompt}\n\n"
+                "=== ENVIRONMENTAL ANALYSIS MODE ===\n"
+                "Evidence retrieval failed. State clearly that you cannot answer "
+                "this environmental question right now and do NOT fabricate "
+                "measurements, values or sources."
+            )
 
     def send_message(
         self,

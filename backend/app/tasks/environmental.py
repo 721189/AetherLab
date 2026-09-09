@@ -64,25 +64,39 @@ async def collect_for_location_async(
     """
     from app.services.environmental import EnvironmentalIngestionService
 
-    db = _session()
-    try:
-        ingestion = EnvironmentalIngestionService(db)
-        summary: Dict[str, Any] = {
-            "location": location_name,
-            "weather": False,
-            "air_quality": False,
-        }
+    summary: Dict[str, Any] = {
+        "location": location_name,
+        "weather": False,
+        "air_quality": False,
+    }
 
-        async def _safe(coro, label):
-            try:
-                return await coro
-            except Exception as exc:  # provider errors must not kill the batch
-                return {"error": f"{label} failed: {exc}"}
+    async def _safe(coro, label):
+        try:
+            return await coro
+        except Exception as exc:  # provider errors must not kill the batch
+            return {"error": f"{label} failed: {exc}"}
+
+    # CRITICAL: each ingestion gets its OWN database session. SQLAlchemy
+    # sessions are NOT safe to share across concurrent coroutines — sharing
+    # one session via asyncio.gather() causes "session already flushed" /
+    # "object is already attached to a session" errors under load.
+    weather_db = _session()
+    air_db = _session()
+    try:
+        weather_ingestion = EnvironmentalIngestionService(weather_db)
+        air_ingestion = EnvironmentalIngestionService(air_db)
 
         weather_obs, air_obs = await asyncio.gather(
-            _safe(ingestion.ingest_weather(lat, lon, location_name), "weather"),
-            _safe(ingestion.ingest_air_quality(lat, lon, location_name), "air quality"),
+            _safe(weather_ingestion.ingest_weather(lat, lon, location_name), "weather"),
+            _safe(air_ingestion.ingest_air_quality(lat, lon, location_name), "air quality"),
         )
+        # Commit each session independently so one failing ingestion does not
+        # roll back the other's successful work.
+        for db in (weather_db, air_db):
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
 
         if isinstance(weather_obs, list) and weather_obs:
             summary["weather"] = True
@@ -93,7 +107,14 @@ async def collect_for_location_async(
         else:
             summary["air_quality_error"] = air_obs.get("error", "no data")
 
-        # Derived legacy snapshot for API compatibility (best-effort).
+        # Derived legacy snapshot for API compatibility.
+        summary["reading"] = EnvironmentalIngestionService.derive_reading_payload(
+            lat, lon, location_name, weather_obs, air_obs
+        )
+        return summary
+    finally:
+        weather_db.close()
+        air_db.close()patibility (best-effort).
         if summary["weather"] or summary["air_quality"]:
             try:
                 payload = EnvironmentalIngestionService.derive_reading_payload(
@@ -192,6 +213,21 @@ def discover_locations() -> List[Dict[str, Any]]:
     try:
         rows = MonitoredLocationRepository(db).get_enabled()
         if not rows:
+            # FAIL CLOSED: an empty monitored-locations table must NEVER
+            # silently become five demo cities — especially in production,
+            # where that would mask a data-loss incident as "successful"
+            # collection. Operators must explicitly seed locations.
+            if settings.APP_ENV == "production":
+                raise RuntimeError(
+                    "No monitored locations configured and APP_ENV=production; "
+                    "refusing to silently fall back to default cities. Seed "
+                    "monitored_locations before enabling collection."
+                )
+            logger.warning(
+                "No monitored locations configured; falling back to platform "
+                "defaults (APP_ENV=%s). Seed monitored_locations to override.",
+                settings.APP_ENV,
+            )
             return list(DEFAULT_LOCATIONS)
         return [
             {
